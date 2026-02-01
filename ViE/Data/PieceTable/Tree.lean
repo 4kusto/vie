@@ -69,13 +69,29 @@ def mkInternal (children : Array PieceTree) : PieceTree :=
       { bytes := 0, lines := 0, chars := 0, height := h }
     internal children stats
 
-/-- Concatenate two trees -/
-partial def concat (l : PieceTree) (r : PieceTree) : PieceTree :=
-  match l, r with
-  | empty, _ => r
-  | _, empty => l
+/-- Helper lemma for termination proofs -/
+private theorem sizeOf_get_lt_internal (cs : Array PieceTree) (s : Stats) (i : Nat) (h : i < cs.size) :
+    sizeOf (cs[i]) < sizeOf (internal cs s) := by
+  cases cs with | mk data =>
+  -- 1. Relate Array access to List access
+  have eq : (Array.mk data)[i] = data.get ⟨i, h⟩ := rfl
+  rw [eq]
+  -- 2. Use standard List size property
+  have lt_list : sizeOf (data.get ⟨i, h⟩) < sizeOf data :=
+    List.sizeOf_lt_of_mem (List.get_mem data ⟨i, h⟩)
+  -- 3. Prove data < internal cs s using simplification
+  have lt_internal : sizeOf data < sizeOf (internal (Array.mk data) s) := by
+    grind only [internal.sizeOf_spec, Array.mk.sizeOf_spec]
+  -- 4. Transitivity
+  apply Nat.lt_trans lt_list lt_internal
 
-  | leaf ps1 _, leaf ps2 _ =>
+/-- Concatenate two trees -/
+def concat (l : PieceTree) (r : PieceTree) : PieceTree :=
+  match h : (l, r) with
+  | (empty, _) => r
+  | (_, empty) => l
+
+  | (leaf ps1 _, leaf ps2 _) =>
     let ps := ps1 ++ ps2
     if ps.size <= NodeCapacity then
       mkLeaf ps
@@ -86,7 +102,7 @@ partial def concat (l : PieceTree) (r : PieceTree) : PieceTree :=
       let r := mkLeaf (ps.extract mid ps.size)
       mkInternal #[l, r]
 
-  | internal cs1 _, internal cs2 _ =>
+    | (internal cs1 s1, internal cs2 s2) =>
     if l.height == r.height then
       let cs := cs1 ++ cs2
       if cs.size <= NodeCapacity then
@@ -98,73 +114,106 @@ partial def concat (l : PieceTree) (r : PieceTree) : PieceTree :=
         mkInternal #[l, r]
     else if l.height > r.height then
       -- Append r to the last child of l
-      let lastIdx := cs1.size - 1
-      let lastChild := cs1[lastIdx]!
-      let newLast := concat lastChild r
-
-      if newLast.height == lastChild.height then
-        mkInternal (cs1.set! lastIdx newLast)
+      if h_empty : cs1.size = 0 then r
       else
-        match newLast with
-        | internal subChildren _ =>
-             let newCs := cs1.pop ++ subChildren
-             if newCs.size <= NodeCapacity then mkInternal newCs
-             else
-                let mid := newCs.size / 2
-                mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-        | _ => mkInternal (cs1.push newLast)
+        let lastIdx := cs1.size - 1
+        have h_bound : lastIdx < cs1.size := Nat.pred_lt h_empty
+        let lastChild := cs1[lastIdx]
+        let newLast := concat lastChild r
+
+        if newLast.height == lastChild.height then
+          mkInternal (cs1.set! lastIdx newLast)
+        else
+          match newLast with
+          | internal subChildren _ =>
+               let newCs := cs1.pop ++ subChildren
+               if newCs.size <= NodeCapacity then mkInternal newCs
+               else
+                  let mid := newCs.size / 2
+                  mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
+          | _ => mkInternal (cs1.push newLast)
 
     else -- l.height < r.height
-      let firstChild := cs2[0]!
-      let newFirst := concat l firstChild
-
-      if newFirst.height == firstChild.height then
-        mkInternal (cs2.set! 0 newFirst)
+      if h_empty : cs2.size = 0 then l
       else
-         match newFirst with
-         | internal subChildren _ =>
-             let newCs := subChildren ++ cs2.extract 1 cs2.size
-             if newCs.size <= NodeCapacity then mkInternal newCs
-             else
-                let mid := newCs.size / 2
-                mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-         | _ => mkInternal ((#[newFirst] ++ cs2))
+        have h_bound : 0 < cs2.size := Nat.pos_of_ne_zero h_empty
+        let firstChild := cs2[0]
+        let newFirst := concat l firstChild
 
-  | leaf _ _, internal _ _ =>
-      let firstChild := match r with | internal cs _ => cs[0]! | _ => empty
-      let newFirst := concat l firstChild
-      match r with
-      | internal cs2 _ =>
-          if newFirst.height == firstChild.height then
-            mkInternal (cs2.set! 0 newFirst)
-          else
-             match newFirst with
-             | internal subChildren _ =>
-                 let newCs := subChildren ++ cs2.extract 1 cs2.size
-                 if newCs.size <= NodeCapacity then mkInternal newCs
-                 else
-                    let mid := newCs.size / 2
-                    mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-             | _ => mkInternal ((#[newFirst] ++ cs2))
-      | _ => empty
+        if newFirst.height == firstChild.height then
+          mkInternal (cs2.set! 0 newFirst)
+        else
+           match newFirst with
+           | internal subChildren _ =>
+               let newCs := subChildren ++ cs2.extract 1 cs2.size
+               if newCs.size <= NodeCapacity then mkInternal newCs
+               else
+                  let mid := newCs.size / 2
+                  mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
+           | _ => mkInternal ((#[newFirst] ++ cs2))
 
-  | internal _ _, leaf _ _ =>
-      let cs1 := match l with | internal cs _ => cs | _ => #[]
-      let lastIdx := cs1.size - 1
-      let lastChild := cs1[lastIdx]!
-      let newLast := concat lastChild r
-
-      if newLast.height == lastChild.height then
-        mkInternal (cs1.set! lastIdx newLast)
+  | (leaf ps1 s1, internal cs2 s2) =>
+      if h_empty : cs2.size = 0 then l
       else
-        match newLast with
-        | internal subChildren _ =>
-            let newCs := cs1.pop ++ subChildren
-            if newCs.size <= NodeCapacity then mkInternal newCs
-            else
-               let mid := newCs.size / 2
-               mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-        | _ => mkInternal (cs1.push newLast)
+        have h_bound : 0 < cs2.size := Nat.pos_of_ne_zero h_empty
+        let firstChild := cs2[0]
+        let newFirst := concat l firstChild
+        if newFirst.height == firstChild.height then
+          mkInternal (cs2.set! 0 newFirst)
+        else
+           match newFirst with
+           | internal subChildren _ =>
+               let newCs := subChildren ++ cs2.extract 1 cs2.size
+               if newCs.size <= NodeCapacity then mkInternal newCs
+               else
+                  let mid := newCs.size / 2
+                  mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
+           | _ => mkInternal ((#[newFirst] ++ cs2))
+
+  | (internal cs1 s1, leaf ps2 s2) =>
+      if h_empty : cs1.size = 0 then r
+      else
+        let lastIdx := cs1.size - 1
+        have h_bound : lastIdx < cs1.size := Nat.pred_lt h_empty
+        let lastChild := cs1[lastIdx]
+        let newLast := concat lastChild r
+
+        if newLast.height == lastChild.height then
+          mkInternal (cs1.set! lastIdx newLast)
+        else
+          match newLast with
+          | internal subChildren _ =>
+              let newCs := cs1.pop ++ subChildren
+              if newCs.size <= NodeCapacity then mkInternal newCs
+              else
+                 let mid := newCs.size / 2
+                 mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
+          | _ => mkInternal (cs1.push newLast)
+termination_by sizeOf l + sizeOf r
+decreasing_by
+  simp_wf
+  -- Case 1: l.height > r.height
+  · have hl : l = internal cs1 s1 := congrArg Prod.fst h
+    rw [hl]
+    try apply Nat.add_lt_add_right
+    apply sizeOf_get_lt_internal _ _ _ (by assumption)
+  -- Case 2: l.height < r.height
+  · have hr : r = internal cs2 s2 := congrArg Prod.snd h
+    rw [hr]
+    try apply Nat.add_lt_add_left
+    apply sizeOf_get_lt_internal _ _ _ (by assumption)
+  -- Case 3: l is leaf, r is internal
+  · have hr : r = internal cs2 s2 := congrArg Prod.snd h
+    rw [hr]
+    try apply Nat.add_lt_add_left
+    apply sizeOf_get_lt_internal _ _ _ (by assumption)
+  -- Case 4: l is internal, r is leaf
+  · have hl : l = internal cs1 s1 := congrArg Prod.fst h
+    rw [hl]
+    try apply Nat.add_lt_add_right
+    apply sizeOf_get_lt_internal _ _ _ (by assumption)
+
+
 
 /-- Split a leaf node at a specific piece index and internal offset -/
 def splitLeaf (pieces : Array Piece) (stats : Stats) (pt : PieceTable) (offset : Nat) : (PieceTree × PieceTree) :=
@@ -197,32 +246,61 @@ def splitLeaf (pieces : Array Piece) (stats : Stats) (pt : PieceTable) (offset :
       let rightPieces := (#[p2]).append (pieces.extract (idx + 1) pieces.size)
       (mkLeaf leftPieces, mkLeaf rightPieces)
 
-/-- Split the tree at a given character offset. -/
-partial def split (t : PieceTree) (offset : Nat) (pt : PieceTable) : (PieceTree × PieceTree) :=
-  match t with
-  | empty => (empty, empty)
-  | leaf pieces s => splitLeaf pieces s pt offset
-  | internal children curStats =>
-    if offset == 0 then (empty, t)
-    else if offset >= curStats.bytes then (t, empty)
+
+mutual
+  /-- Split the tree at a given character offset. -/
+  def split (t : PieceTree) (offset : Nat) (pt : PieceTable) : (PieceTree × PieceTree) :=
+    match t with
+    | empty => (empty, empty)
+    | leaf pieces s => splitLeaf pieces s pt offset
+    | internal children curStats =>
+      if offset == 0 then (empty, t)
+      else if offset >= curStats.bytes then (t, empty)
+      else
+        splitAux children offset pt 0 0
+  termination_by (sizeOf t, 0)
+  decreasing_by
+    simp_wf
+    -- split -> splitAux
+    apply Prod.Lex.left
+    simp +arith
+
+  /-- Aux helper for internal node split to scan children -/
+  def splitAux (children : Array PieceTree) (offset : Nat) (pt : PieceTable) (i : Nat) (accOff : Nat) : (PieceTree × PieceTree) :=
+    if h : i < children.size then
+      let c := children[i]
+      if accOff + c.length > offset then
+        let (cLeft, cRight) := split c (offset - accOff) pt
+
+        let leftChildren := (children.extract 0 i).push cLeft
+        let rightChildren := (#[cRight]).append (children.extract (i + 1) children.size)
+
+        let leftFiltered := leftChildren.filter (fun c => c.length > 0)
+        let rightFiltered := rightChildren.filter (fun c => c.length > 0)
+
+        (mkInternal leftFiltered, mkInternal rightFiltered)
+      else
+        splitAux children offset pt (i + 1) (accOff + c.length)
     else
-      let rec scan (i : Nat) (accOff : Nat) : (PieceTree × PieceTree) :=
-        if i >= children.size then (t, empty)
-        else
-          let c := children[i]!
-          if accOff + c.length > offset then
-            let (cLeft, cRight) := split c (offset - accOff) pt
+      (mkInternal children, empty)
+  termination_by (sizeOf children, children.size - i)
+  decreasing_by
+    all_goals simp_wf
+    -- splitAux -> split (c)
+    · apply Prod.Lex.left
+      cases children with | mk data =>
+      have lt_list : sizeOf (data.get ⟨i, h⟩) < sizeOf data :=
+        List.sizeOf_lt_of_mem (List.get_mem data ⟨i, h⟩)
+      have lt_array : sizeOf data < sizeOf (Array.mk data) := by
+        grind only [Array.mk.sizeOf_spec]
+      exact Nat.lt_trans lt_list lt_array
 
-            let leftChildren := (children.extract 0 i).push cLeft
-            let rightChildren := (#[cRight]).append (children.extract (i + 1) children.size)
-
-            let leftFiltered := leftChildren.filter (fun c => c.length > 0)
-            let rightFiltered := rightChildren.filter (fun c => c.length > 0)
-
-            (mkInternal leftFiltered, mkInternal rightFiltered)
-          else
-            scan (i + 1) (accOff + c.length)
-      scan 0 0
+    -- splitAux -> splitAux (i+1)
+    · apply Prod.Lex.right
+      apply Nat.sub_lt_sub_left
+      · exact h
+      · exact Nat.lt_succ_self _
+end
 
 /-- Delete range [offset, offset + length) -/
 def delete (t : PieceTree) (offset : Nat) (length : Nat) (pt : PieceTable) : PieceTree :=
@@ -232,40 +310,70 @@ def delete (t : PieceTree) (offset : Nat) (length : Nat) (pt : PieceTable) : Pie
     let (_, r') := split r length pt
     concat l r'
 
-/-- Find offset of the N-th newline (0-indexed). -/
-partial def findNthNewline (t : PieceTree) (n : Nat) (pt : PieceTable) : Nat :=
-  match t with
-  | empty => 0
-  | leaf pieces _ =>
-    let rec scanPieces (i : Nat) (remainingN : Nat) (accOffset : Nat) : Nat :=
-      if i >= pieces.size then accOffset
-      else
-        let p := pieces[i]!
-        if remainingN < p.lineBreaks then
-          let buf := PieceTableHelper.getBuffer pt p.source
-          let rec scan (j : Nat) (cnt : Nat) : Nat :=
-            if j >= p.length then j
-            else
-              if buf[p.start + j]! == 10 then
-                if cnt == remainingN then j
-                else scan (j + 1) (cnt + 1)
-              else scan (j + 1) cnt
-          accOffset + (scan 0 0)
+/-- Helper to scan pieces in a leaf for Nth newline -/
+def findNthNewlineLeaf (pieces : Array Piece) (n : Nat) (pt : PieceTable) (i : Nat) (accOffset : Nat) : Nat :=
+  if h : i < pieces.size then
+    let p := pieces[i]
+    if n < p.lineBreaks then
+      let buf := PieceTableHelper.getBuffer pt p.source
+      let rec scan (j : Nat) (cnt : Nat) : Nat :=
+        if j >= p.length then j
         else
-          scanPieces (i + 1) (remainingN - p.lineBreaks) (accOffset + p.length)
-    scanPieces 0 n 0
+          if buf[p.start + j]! == 10 then
+            if cnt == n then j
+            else scan (j + 1) (cnt + 1)
+          else scan (j + 1) cnt
+      accOffset + (scan 0 0)
+    else
+      findNthNewlineLeaf pieces (n - p.lineBreaks) pt (i + 1) (accOffset + p.length)
+  else
+    accOffset
+termination_by pieces.size - i
 
-  | internal children _ =>
-    let rec scanChildren (i : Nat) (remainingN : Nat) (accOffset : Nat) : Nat :=
-      if i >= children.size then accOffset
+mutual
+  /-- Find offset of the N-th newline (0-indexed). -/
+  def findNthNewline (t : PieceTree) (n : Nat) (pt : PieceTable) : Nat :=
+    match t with
+    | empty => 0
+    | leaf pieces _ => findNthNewlineLeaf pieces n pt 0 0
+    | internal children _ => findNthNewlineAux children n pt 0 0
+  termination_by (sizeOf t, 0)
+  decreasing_by
+    simp_wf
+    -- findNthNewline -> findNthNewlineAux
+    apply Prod.Lex.left
+    simp +arith
+
+  def findNthNewlineAux (children : Array PieceTree) (n : Nat) (pt : PieceTable) (i : Nat) (accOffset : Nat) : Nat :=
+    if h : i < children.size then
+      let child := children[i]
+      let childLines := child.lineBreaks
+      if n < childLines then
+        accOffset + findNthNewline child n pt
       else
-        let child := children[i]!
-        let childLines := child.lineBreaks
-        if remainingN < childLines then
-          accOffset + findNthNewline child remainingN pt
-        else
-          scanChildren (i + 1) (remainingN - childLines) (accOffset + child.length)
-    scanChildren 0 n 0
+        findNthNewlineAux children (n - childLines) pt (i + 1) (accOffset + child.length)
+    else
+      accOffset
+  termination_by (sizeOf children, children.size - i)
+  decreasing_by
+    all_goals simp_wf
+    -- findNthNewlineAux -> findNthNewline
+    · apply Prod.Lex.left
+      cases children with | mk data =>
+      have eq : (Array.mk data)[i] = data.get ⟨i, h⟩ := rfl
+      rw [eq]
+      have lt_list : sizeOf (data.get ⟨i, h⟩) < sizeOf data :=
+        List.sizeOf_lt_of_mem (List.get_mem data ⟨i, h⟩)
+      have lt_array : sizeOf data < sizeOf (Array.mk data) := by
+        grind only [Array.mk.sizeOf_spec]
+      exact Nat.lt_trans lt_list lt_array
+    -- findNthNewlineAux -> findNthNewlineAux
+    · apply Prod.Lex.right
+      apply Nat.sub_lt_sub_left
+      · exact h
+      · exact Nat.lt_succ_self _
+end
+
 
 /-- Get substring of tree from start to end offset -/
 partial def getSubstring (t : PieceTree) (startOff endOff : Nat) (pt : PieceTable) : String :=
