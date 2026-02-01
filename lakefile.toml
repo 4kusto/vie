@@ -1,0 +1,10 @@
+name = "vie"
+version = "0.1.0"
+defaultTargets = ["vie"]
+
+[[lean_lib]]
+name = "ViE"
+
+[[lean_exe]]
+name = "vie"
+root = "Main"
