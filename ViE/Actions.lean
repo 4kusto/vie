@@ -8,7 +8,7 @@ import ViE.Loader
 import ViE.Checkpoint
 import ViE.Types
 import ViE.Window.Actions
-import ViE.Buffer.Manager
+import ViE.Buffer
 
 namespace ViE
 

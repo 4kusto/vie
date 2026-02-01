@@ -7,7 +7,7 @@ import ViE.Types
 import ViE.Buffer.Content
 import ViE.Window.Actions
 import ViE.Window.Analysis
-import ViE.Buffer.Manager
+import ViE.Buffer
 import ViE.Command.Explorer
 import ViE.Command.Parser
 

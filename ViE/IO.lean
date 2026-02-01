@@ -1,6 +1,6 @@
 import ViE.State
 import ViE.Basic
-import ViE.Buffer.LowIO
+import ViE.Buffer
 
 namespace ViE
 open ViE.PieceTable
