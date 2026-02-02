@@ -25,8 +25,8 @@ instance : ToString Mode where
 /-- Workspace configuration -/
 structure Workspace where
   rootPath : Option String := none
-  displayName : String := "Untitled"
-deriving Repr
+  name : String := "Untitled"
+deriving Repr, Inhabited
 
 /-- Row index (0-based) with dimensional safety -/
 structure Row where
@@ -164,20 +164,20 @@ structure FileBuffer where
 -- Manual Repr instance
 instance : Repr FileBuffer where
   reprPrec buf _ :=
-    s!"FileBuffer(id={buf.id}, file={buf.filename}, dirty={buf.dirty}, lines={PieceTree.lineBreaks buf.table.tree + 1})"
+    s!"FileBuffer(id={buf.id}, file={buf.filename}, dirty={buf.dirty}, lines={buf.table.lineCount})"
 
 def initialFileBuffer : FileBuffer := {
   id := 0
   filename := none
   dirty := false
-  table := PieceTable.fromString ""
+  table := ViE.PieceTable.fromString ""
   missingEol := false
   cache := { lineMap := Lean.RBMap.empty }
 }
 
 namespace FileBuffer
   def lineCount (buf : FileBuffer) : Nat :=
-    PieceTree.lineBreaks buf.table.tree + 1
+    buf.table.tree.lineBreaks + 1
 
   def clearCache (buf : FileBuffer) : FileBuffer :=
     { buf with cache := { lineMap := Lean.RBMap.empty } }
@@ -223,6 +223,7 @@ structure InputState where
 
 /-- State for a single workgroup (independent buffer set and layout) -/
 structure WorkgroupState where
+  name : String
   buffers : List FileBuffer
   nextBufferId : Nat
   layout : Layout

@@ -68,7 +68,7 @@ def utf8ByteLength (b : UInt8) : Nat :=
   else if (b &&& 0xF8) == 0xF0 then 4
   else 0 -- Invalid or continuation
 
-/-- Count newlines in a byte array slice efficiently -/
+/-- Count newlines in a byte array slice. -/
 def countNewlines (data : ByteArray) (start : Nat) (len : Nat) : Nat :=
   let endPos := start + len
   let rec loop (i : Nat) (count : Nat) : Nat :=

@@ -4,7 +4,8 @@ import Test.Layout
 import Test.Integration
 import Test.Keybinds
 import Test.Mode
-import Test.BugReproduction
+import Test.CursorReproduction
+import Test.PasteReproduction
 import Test.PieceTable.Basic
 import Test.PieceTable.UndoRedo
 import Test.PieceTable.Appended
@@ -18,7 +19,8 @@ def test : IO Unit := do
   Test.Integration.test
   Test.Keybinds.test
   Test.Mode.test
-  Test.BugReproduction.test
+  Test.CursorReproduction.test
+  Test.PasteReproduction.test
   Test.PieceTable.Basic.test
   Test.PieceTable.UndoRedo.test
   Test.PieceTable.Appended.test

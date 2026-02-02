@@ -82,22 +82,30 @@ def cmdWinCycle (_ : List String) (state : EditorState) : IO EditorState := retu
 def cmdCd (args : List String) (state : EditorState) : IO EditorState :=
   match args with
   | [path] =>
-    -- Change workspace
     let absPath := if path.startsWith "/" then path
                    else match state.workspace.rootPath with
                         | some root => root ++ "/" ++ path
                         | none => path
     return { state with
-      workspace := { rootPath := some absPath },
-      message := s!"Workspace: {absPath}"
+      workspace := { state.workspace with rootPath := some absPath },
+      message := s!"Workspace path: {absPath}"
     }
   | [] =>
-    -- Clear workspace
     return { state with
       workspace := defaultWorkspace,
       message := "Workspace cleared"
     }
   | _ => return { state with message := "Usage: :cd [path]" }
+
+def cmdWorkspace (args : List String) (state : EditorState) : IO EditorState :=
+  match args with
+  | ["open", path] => cmdCd [path] state
+  | ["rename", name] =>
+    return { state with
+      workspace := { state.workspace with name := name },
+      message := s!"Workspace renamed to: {name}"
+    }
+  | _ => return { state with message := "Usage: :workspace <open|rename> <args>" }
 
 def cmdPwd (_ : List String) (state : EditorState) : IO EditorState :=
   match state.workspace.rootPath with
@@ -106,17 +114,65 @@ def cmdPwd (_ : List String) (state : EditorState) : IO EditorState :=
 
 def cmdWg (args : List String) (state : EditorState) : IO EditorState :=
   match args with
+  | ["new"] =>
+    let name := s!"Group {state.workgroups.size}"
+    let nextBufId := state.workgroups.foldl (fun m g => max m g.nextBufferId) 0
+    let newWg := createEmptyWorkgroup name nextBufId
+    let newState := { state with
+      workgroups := state.workgroups.push newWg,
+      currentGroup := state.workgroups.size -- switch to new one using the size before push
+    }
+    return { newState with message := s!"Created workgroup: {name}" }
+  | ["new", name] =>
+    let nextBufId := state.workgroups.foldl (fun m g => max m g.nextBufferId) 0
+    let newWg := createEmptyWorkgroup name nextBufId
+    let newState := { state with
+      workgroups := state.workgroups.push newWg,
+      currentGroup := state.workgroups.size
+    }
+    return { newState with message := s!"Created workgroup: {name}" }
+  | ["close"] =>
+    if state.workgroups.size <= 1 then
+      return { state with message := "Cannot close the last workgroup" }
+    else
+      if h_idx : state.currentGroup < state.workgroups.size then
+        let newGroups := state.workgroups.eraseIdx state.currentGroup h_idx
+        let newIdx := if state.currentGroup >= newGroups.size then newGroups.size - 1 else state.currentGroup
+        return { state with
+          workgroups := newGroups,
+          currentGroup := newIdx,
+          message := "Workgroup closed"
+        }
+      else
+        return { state with message := "Error: invalid workgroup index" }
+  | ["rename", name] =>
+    let current := state.workgroups[state.currentGroup]!
+    let updated := { current with name := name }
+    return { state with
+      workgroups := state.workgroups.set! state.currentGroup updated,
+      message := s!"Workgroup renamed to: {name}"
+    }
+  | ["next"] =>
+    let nextIdx := (state.currentGroup + 1) % state.workgroups.size
+    let wg := state.workgroups[nextIdx]!
+    return { state with currentGroup := nextIdx, message := s!"Switched to: {wg.name}" }
+  | ["prev"] =>
+    let prevIdx := if state.currentGroup == 0 then state.workgroups.size - 1 else state.currentGroup - 1
+    let wg := state.workgroups[prevIdx]!
+    return { state with currentGroup := prevIdx, message := s!"Switched to: {wg.name}" }
   | [n] =>
     match n.toNat? with
     | some num =>
-      if num < 10 then
-        let s' := state.switchToWorkgroup num
-        return { s' with message := s!"Switched to workgroup {num}" }
+      if num < state.workgroups.size then
+        let wg := state.workgroups[num]!
+        return { state with currentGroup := num, message := s!"Switched to: {wg.name}" }
       else
-        return { state with message := "Workgroup number must be 0-9" }
+        return { state with message := s!"Workgroup index out of range (0-{state.workgroups.size - 1})" }
     | none => return { state with message := "Invalid workgroup number" }
-  | [] => return { state with message := s!"Current workgroup: {state.currentGroup}" }
-  | _ => return { state with message := "Usage: :wg [0-9]" }
+  | [] =>
+    let wg := state.workgroups[state.currentGroup]!
+    return { state with message := s!"Current workgroup: {wg.name} (index {state.currentGroup})" }
+  | _ => return { state with message := "Usage: :wg <new|close|rename|next|prev|index> [args]" }
 
 def cmdExplorer (args : List String) (state : EditorState) : IO EditorState :=
   let path := match args with
@@ -159,6 +215,7 @@ def defaultCommandMap : CommandMap := [
   ("wl", cmdWinRight),
   ("wc", cmdWinCycle),
   ("cd", cmdCd),
+  ("workspace", cmdWorkspace),
   ("pwd", cmdPwd),
   ("wg", cmdWg),
   ("ee", cmdExplorer),

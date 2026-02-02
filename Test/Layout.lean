@@ -25,14 +25,14 @@ def test : IO Unit := do
   let hsplit := Layout.hsplit win1 win2 0.5
 
   match hsplit with
-  | .hsplit l r ratio =>
+  | .hsplit _ _ ratio =>
       assert "HSplit match" true
       assert "HSplit ratio" (ratio == 0.5)
   | _ => assert "HSplit construction failed" false
 
   let vsplit := Layout.vsplit hsplit win1 0.3
   match vsplit with
-  | .vsplit t b ratio =>
+  | .vsplit t _ ratio =>
       assert "VSplit match" true
       assert "VSplit ratio" (ratio == 0.3)
       match t with

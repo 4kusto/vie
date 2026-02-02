@@ -112,7 +112,7 @@ def render (state : EditorState) : IO EditorState := do
       let fileName := buf.filename.getD "[No Name]"
       let modeStr := if id == currentSt.getCurrentWorkgroup.activeWindowId then s!"-- {st.mode} --" else "--"
       let eolMark := if buf.missingEol then " [noeol]" else ""
-      let statusStr := s!"{modeStr} {fileName}{eolMark} [W:{id} B:{view.bufferId}] [WG:{st.currentGroup}] {st.workspace.displayName}"
+      let statusStr := s!"{modeStr} {fileName}{eolMark} [W:{id} B:{view.bufferId}] [{wg.name}] {st.workspace.name}"
       winBuf := winBuf.push st.config.statusBarStyle
       winBuf := winBuf.push statusStr.trimAscii.toString
       winBuf := winBuf.push Terminal.clearLineStr

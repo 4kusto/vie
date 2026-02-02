@@ -1,5 +1,4 @@
 import ViE.Data.PieceTable.Piece
-import ViE.Data.PieceTable.Types
 import ViE.Unicode
 
 namespace ViE
@@ -7,522 +6,342 @@ namespace ViE
 namespace PieceTableHelper
 
 /-- Get the buffer data corresponding to a source -/
-def getBuffer (pt : PieceTable) (source : BufferSource) : ByteArray :=
+def getBuffer (pt : ViE.PieceTable) (source : ViE.BufferSource) : ByteArray :=
   match source with
-  | .original => pt.original
-  | .add => pt.add
+  | ViE.BufferSource.original => pt.original
+  | ViE.BufferSource.add idx => pt.addBuffers.getD idx (ByteArray.mk #[])
 
-/-- Append text to add buffer -/
-def appendText (pt : PieceTable) (text : String) : (PieceTable × Piece) :=
+/-- Append text to add buffer, splitting into chunks if necessary -/
+def appendText (pt : ViE.PieceTable) (text : String) : (ViE.PieceTable × Array ViE.Piece) :=
   let bytes := text.toUTF8
-  let start := pt.add.size
-  let len := bytes.size
-  let newAdd := pt.add ++ bytes
-  let newLines := ViE.Unicode.countNewlines bytes 0 len
-  let newChars := ViE.Unicode.countChars bytes 0 len
-  let piece := { source := .add, start := start, length := len, lineBreaks := newLines, charCount := newChars }
-  ({ pt with add := newAdd }, piece)
+  let totalSize := bytes.size
+  let bufferIdx := pt.addBuffers.size
+  let newAddBuffers := pt.addBuffers.push bytes
 
-/-- Split a piece into two at a given relative offset. -/
-def splitPiece (pt : PieceTable) (p : Piece) (offset : Nat) : (Piece × Piece) :=
+  let rec splitChunks (start : Nat) (acc : Array ViE.Piece) : Array ViE.Piece :=
+    if start >= totalSize then acc
+    else
+      let len := min ViE.ChunkSize (totalSize - start)
+      let lines := ViE.Unicode.countNewlines bytes start len
+      let chars := ViE.Unicode.countChars bytes start len
+      let piece : ViE.Piece := {
+        source := ViE.BufferSource.add bufferIdx,
+        start := start,
+        length := len,
+        lineBreaks := lines,
+        charCount := chars
+      }
+      splitChunks (start + len) (acc.push piece)
+    termination_by totalSize - start
+    decreasing_by
+      simp_wf
+      rw [Nat.sub_add_eq]
+      have h : start < totalSize := Nat.lt_of_not_le (by assumption)
+      apply Nat.sub_lt_self
+      · have h1 : 0 < totalSize - start := Nat.sub_pos_of_lt h
+        apply Nat.lt_min.mpr
+        constructor
+        . show 0 < ViE.ChunkSize
+          unfold ViE.ChunkSize
+          exact Nat.zero_lt_succ _
+        · assumption
+      · apply Nat.min_le_right
+
+  let ps := splitChunks 0 #[]
+  ({ pt with addBuffers := newAddBuffers }, ps)
+
+/-- Split a piece into two at a given relative offset -/
+def splitPiece (p : ViE.Piece) (offset : Nat) (pt : ViE.PieceTable) : (ViE.Piece × ViE.Piece) :=
   let buf := getBuffer pt p.source
   let leftLen := offset
   let rightLen := p.length - offset
+
   let leftLines := ViE.Unicode.countNewlines buf p.start leftLen
-  let rightLines := p.lineBreaks - leftLines
   let leftChars := ViE.Unicode.countChars buf p.start leftLen
-  let rightChars := p.charCount - leftChars
-  let leftP := { p with length := leftLen, lineBreaks := leftLines, charCount := leftChars }
-  let rightP := { p with start := p.start + leftLen, length := rightLen, lineBreaks := rightLines, charCount := rightChars }
-  (leftP, rightP)
+
+  let leftPiece : ViE.Piece := { p with length := leftLen, lineBreaks := leftLines, charCount := leftChars }
+  let rightPiece : ViE.Piece := { p with
+    start := p.start + leftLen,
+    length := rightLen,
+    lineBreaks := p.lineBreaks - leftLines,
+    charCount := p.charCount - leftChars
+  }
+  (leftPiece, rightPiece)
 
 end PieceTableHelper
 
 namespace PieceTree
 
 /-- Get stats of a tree -/
-def stats : PieceTree → Stats
-  | empty => Stats.empty
-  | leaf _ s => s
-  | internal _ s => s
+def stats (t : ViE.PieceTree) : ViE.Stats :=
+  match t with
+  | ViE.PieceTree.empty => ViE.Stats.empty
+  | ViE.PieceTree.leaf _ s => s
+  | ViE.PieceTree.internal _ s => s
 
-def length (t : PieceTree) : Nat := t.stats.bytes
-def lineBreaks (t : PieceTree) : Nat := t.stats.lines
-def height (t : PieceTree) : Nat := t.stats.height
+def length (t : ViE.PieceTree) : Nat := (stats t).bytes
+def lineBreaks (t : ViE.PieceTree) : Nat := (stats t).lines
+def height (t : ViE.PieceTree) : Nat := (stats t).height
 
-/-- Helper to construct a leaf node from pieces -/
-def mkLeaf (pieces : Array Piece) : PieceTree :=
-  let stats := pieces.foldl (fun s p =>
-    { s with bytes := s.bytes + p.length, lines := s.lines + p.lineBreaks, chars := s.chars + p.charCount })
-    { bytes := 0, lines := 0, chars := 0, height := 1 }
-  leaf pieces stats
+/-- Create a leaf node -/
+def mkLeaf (pieces : Array ViE.Piece) : ViE.PieceTree :=
+  let s := pieces.foldl (fun acc p => acc + (ViE.Stats.ofPiece p)) ViE.Stats.empty
+  ViE.PieceTree.leaf pieces s
 
-/-- Helper to construct an internal node from children -/
-def mkInternal (children : Array PieceTree) : PieceTree :=
-  if children.isEmpty then empty
+/-- Create an internal node -/
+def mkInternal (children : Array ViE.PieceTree) : ViE.PieceTree :=
+  let s := children.foldl (fun acc c => acc + (stats c)) ViE.Stats.empty
+  let s := { s with height := s.height + 1 }
+  ViE.PieceTree.internal children s
+
+/-- Efficiently concatenate a list of pieces into a tree -/
+partial def fromPieces (pieces : Array ViE.Piece) : ViE.PieceTree :=
+  if pieces.isEmpty then ViE.PieceTree.empty
+  else if pieces.size <= ViE.NodeCapacity then
+    mkLeaf pieces
   else
-    let firstHeight := (children[0]!).height
-    let h := firstHeight + 1
-    let stats := children.foldl (fun s c =>
-      let cs := c.stats
-      { s with bytes := s.bytes + cs.bytes, lines := s.lines + cs.lines, chars := s.chars + cs.chars })
-      { bytes := 0, lines := 0, chars := 0, height := h }
-    internal children stats
+    let mid := pieces.size / 2
+    let left := fromPieces (pieces.extract 0 mid)
+    let right := fromPieces (pieces.extract mid pieces.size)
+    mkInternal #[left, right]
 
-/-- Helper lemma for termination proofs -/
-private theorem sizeOf_get_lt_internal (cs : Array PieceTree) (s : Stats) (i : Nat) (h : i < cs.size) :
-    sizeOf (cs[i]) < sizeOf (internal cs s) := by
-  cases cs with | mk data =>
-  -- 1. Relate Array access to List access
-  have eq : (Array.mk data)[i] = data.get ⟨i, h⟩ := rfl
-  rw [eq]
-  -- 2. Use standard List size property
-  have lt_list : sizeOf (data.get ⟨i, h⟩) < sizeOf data :=
-    List.sizeOf_lt_of_mem (List.get_mem data ⟨i, h⟩)
-  -- 3. Prove data < internal cs s using simplification
-  have lt_internal : sizeOf data < sizeOf (internal (Array.mk data) s) := by
-    grind only [= internal.sizeOf_spec, = Array.mk.sizeOf_spec]
-  -- 4. Transitivity
-  apply Nat.lt_trans lt_list lt_internal
+/-- Concatenate two trees while maintaining B+ tree invariants -/
+partial def concat (l : ViE.PieceTree) (r : ViE.PieceTree) : ViE.PieceTree :=
+  match l, r with
+  | ViE.PieceTree.empty, _ => r
+  | _, ViE.PieceTree.empty => l
 
-/-- Concatenate two trees -/
-def concat (l : PieceTree) (r : PieceTree) : PieceTree :=
-  match h : (l, r) with
-  | (empty, _) => r
-  | (_, empty) => l
-
-  | (leaf ps1 _, leaf ps2 _) =>
-    let ps := ps1 ++ ps2
-    if ps.size <= NodeCapacity then
-      mkLeaf ps
-    else
-      -- Split into two leaves
-      let mid := ps.size / 2
-      let l := mkLeaf (ps.extract 0 mid)
-      let r := mkLeaf (ps.extract mid ps.size)
-      mkInternal #[l, r]
-
-    | (internal cs1 s1, internal cs2 s2) =>
-    if l.height == r.height then
-      let cs := cs1 ++ cs2
-      if cs.size <= NodeCapacity then
-        mkInternal cs
-      else
-        let mid := cs.size / 2
-        let l := mkInternal (cs.extract 0 mid)
-        let r := mkInternal (cs.extract mid cs.size)
-        mkInternal #[l, r]
-    else if l.height > r.height then
-      -- Append r to the last child of l
-      if h_empty : cs1.size = 0 then r
-      else
-        let lastIdx := cs1.size - 1
-        have h_bound : lastIdx < cs1.size := Nat.pred_lt h_empty
-        let lastChild := cs1[lastIdx]
-        let newLast := concat lastChild r
-
-        if newLast.height == lastChild.height then
-          mkInternal (cs1.set! lastIdx newLast)
+  | ViE.PieceTree.leaf ps1 _, ViE.PieceTree.leaf ps2 _ =>
+    -- Try to merge the last piece of ps1 with the first piece of ps2
+    if ps1.size > 0 && ps2.size > 0 then
+      let p1 := ps1.back!
+      let p2 := ps2[0]!
+      if p1.source == p2.source && p1.start + p1.length == p2.start then
+        let mergedPiece : ViE.Piece := { p1 with
+          length := p1.length + p2.length,
+          lineBreaks := p1.lineBreaks + p2.lineBreaks,
+          charCount := p1.charCount + p2.charCount
+        }
+        let ps := (ps1.pop).push mergedPiece ++ (ps2.extract 1 ps2.size)
+        if ps.size <= ViE.NodeCapacity then
+          mkLeaf ps
         else
-          match newLast with
-          | internal subChildren _ =>
-               let newCs := cs1.pop ++ subChildren
-               if newCs.size <= NodeCapacity then mkInternal newCs
-               else
-                  let mid := newCs.size / 2
-                  mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-          | _ => mkInternal (cs1.push newLast)
-
-    else -- l.height < r.height
-      if h_empty : cs2.size = 0 then l
+          let mid := ps.size / 2
+          mkInternal #[mkLeaf (ps.extract 0 mid), mkLeaf (ps.extract mid ps.size)]
       else
-        have h_bound : 0 < cs2.size := Nat.pos_of_ne_zero h_empty
-        let firstChild := cs2[0]
-        let newFirst := concat l firstChild
+        let ps := ps1 ++ ps2
+        if ps.size <= ViE.NodeCapacity then mkLeaf ps
+        else mkInternal #[mkLeaf ps1, mkLeaf ps2]
+    else if ps1.size > 0 then l
+    else r
 
-        if newFirst.height == firstChild.height then
-          mkInternal (cs2.set! 0 newFirst)
+  | ViE.PieceTree.internal cs1 _, ViE.PieceTree.internal cs2 _ =>
+    let h1 := height l
+    let h2 := height r
+    if h1 == h2 then
+      -- Merge boundary children
+      let lastChild := cs1.back!
+      let firstChild := cs2[0]!
+      let merged := concat lastChild firstChild
+      match merged with
+      | ViE.PieceTree.internal newCS s =>
+        if s.height == h1 then
+           -- newCS is at the same level as siblings
+           let combined := (cs1.pop) ++ newCS ++ (cs2.extract 1 cs2.size)
+           if combined.size <= ViE.NodeCapacity then mkInternal combined
+           else
+             let mid := combined.size / 2
+             mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
         else
-           match newFirst with
-           | internal subChildren _ =>
-               let newCs := subChildren ++ cs2.extract 1 cs2.size
-               if newCs.size <= NodeCapacity then mkInternal newCs
-               else
-                  let mid := newCs.size / 2
-                  mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-           | _ => mkInternal ((#[newFirst] ++ cs2))
-
-  | (leaf ps1 s1, internal cs2 s2) =>
-      if h_empty : cs2.size = 0 then l
-      else
-        have h_bound : 0 < cs2.size := Nat.pos_of_ne_zero h_empty
-        let firstChild := cs2[0]
-        let newFirst := concat l firstChild
-        if newFirst.height == firstChild.height then
-          mkInternal (cs2.set! 0 newFirst)
+           -- height did not increase, just one child
+           let combined := (cs1.pop).push merged ++ (cs2.extract 1 cs2.size)
+           if combined.size <= ViE.NodeCapacity then mkInternal combined
+           else
+             let mid := combined.size / 2
+             mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+      | _ =>
+        let combined := (cs1.pop).push merged ++ (cs2.extract 1 cs2.size)
+        if combined.size <= ViE.NodeCapacity then mkInternal combined
         else
-           match newFirst with
-           | internal subChildren _ =>
-               let newCs := subChildren ++ cs2.extract 1 cs2.size
-               if newCs.size <= NodeCapacity then mkInternal newCs
-               else
-                  let mid := newCs.size / 2
-                  mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-           | _ => mkInternal ((#[newFirst] ++ cs2))
-
-  | (internal cs1 s1, leaf ps2 s2) =>
-      if h_empty : cs1.size = 0 then r
-      else
-        let lastIdx := cs1.size - 1
-        have h_bound : lastIdx < cs1.size := Nat.pred_lt h_empty
-        let lastChild := cs1[lastIdx]
-        let newLast := concat lastChild r
-
-        if newLast.height == lastChild.height then
-          mkInternal (cs1.set! lastIdx newLast)
+          let mid := combined.size / 2
+          mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+    else if h1 > h2 then
+      -- Insert r into l's right side
+      let lastChild := cs1.back!
+      let newLast := concat lastChild r
+      match newLast with
+      | ViE.PieceTree.internal newChildren s =>
+        if s.height == h1 then
+           -- Split happened at l's level
+           let combined := (cs1.pop) ++ newChildren
+           if combined.size <= ViE.NodeCapacity then mkInternal combined
+           else
+              let mid := combined.size / 2
+              mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
         else
-          match newLast with
-          | internal subChildren _ =>
-              let newCs := cs1.pop ++ subChildren
-              if newCs.size <= NodeCapacity then mkInternal newCs
-              else
-                 let mid := newCs.size / 2
-                 mkInternal #[mkInternal (newCs.extract 0 mid), mkInternal (newCs.extract mid newCs.size)]
-          | _ => mkInternal (cs1.push newLast)
-termination_by sizeOf l + sizeOf r
-decreasing_by
-  simp_wf
-  -- Case 1: l.height > r.height
-  · have hl : l = internal cs1 s1 := congrArg Prod.fst h
-    rw [hl]
-    try apply Nat.add_lt_add_right
-    apply sizeOf_get_lt_internal _ _ _ (by assumption)
-  -- Case 2: l.height < r.height
-  · have hr : r = internal cs2 s2 := congrArg Prod.snd h
-    rw [hr]
-    try apply Nat.add_lt_add_left
-    apply sizeOf_get_lt_internal _ _ _ (by assumption)
-  -- Case 3: l is leaf, r is internal
-  · have hr : r = internal cs2 s2 := congrArg Prod.snd h
-    rw [hr]
-    try apply Nat.add_lt_add_left
-    apply sizeOf_get_lt_internal _ _ _ (by assumption)
-  -- Case 4: l is internal, r is leaf
-  · have hl : l = internal cs1 s1 := congrArg Prod.fst h
-    rw [hl]
-    try apply Nat.add_lt_add_right
-    apply sizeOf_get_lt_internal _ _ _ (by assumption)
-
-
-
-/-- Split a leaf node at a specific piece index and internal offset -/
-def splitLeaf (pieces : Array Piece) (stats : Stats) (pt : PieceTable) (offset : Nat) : (PieceTree × PieceTree) :=
-  let rec findPiece (i : Nat) (currentOff : Nat) : (Nat × Nat) :=
-    if i >= pieces.size then (pieces.size, currentOff)
+           mkInternal ((cs1.pop).push newLast)
+      | _ => mkInternal ((cs1.pop).push newLast)
     else
-      let p := pieces[i]!
-      if currentOff + p.length > offset then (i, currentOff)
-      else findPiece (i + 1) (currentOff + p.length)
-
-  let (idx, pStart) := findPiece 0 0
-
-  if idx >= pieces.size then
-    (leaf pieces stats, empty)
-  else
-    let p := pieces[idx]!
-    let splitOff := offset - pStart
-
-    if splitOff == 0 then
-      let leftArr := pieces.extract 0 idx
-      let rightArr := pieces.extract idx pieces.size
-      (mkLeaf leftArr, mkLeaf rightArr)
-    else if splitOff == p.length then
-      let leftArr := pieces.extract 0 (idx + 1)
-      let rightArr := pieces.extract (idx + 1) pieces.size
-      (mkLeaf leftArr, mkLeaf rightArr)
-    else
-      let (p1, p2) := PieceTableHelper.splitPiece pt p splitOff
-      let leftPieces := (pieces.extract 0 idx).push p1
-      let rightPieces := (#[p2]).append (pieces.extract (idx + 1) pieces.size)
-      (mkLeaf leftPieces, mkLeaf rightPieces)
-
-
-mutual
-  /-- Split the tree at a given character offset. -/
-  def split (t : PieceTree) (offset : Nat) (pt : PieceTable) : (PieceTree × PieceTree) :=
-    match t with
-    | empty => (empty, empty)
-    | leaf pieces s => splitLeaf pieces s pt offset
-    | internal children curStats =>
-      if offset == 0 then (empty, t)
-      else if offset >= curStats.bytes then (t, empty)
-      else
-        splitAux children offset pt 0 0
-  termination_by (sizeOf t, 0)
-  decreasing_by
-    simp_wf
-    -- split -> splitAux
-    apply Prod.Lex.left
-    simp +arith
-
-  /-- Aux helper for internal node split to scan children -/
-  def splitAux (children : Array PieceTree) (offset : Nat) (pt : PieceTable) (i : Nat) (accOff : Nat) : (PieceTree × PieceTree) :=
-    if h : i < children.size then
-      let c := children[i]
-      if accOff + c.length > offset then
-        let (cLeft, cRight) := split c (offset - accOff) pt
-
-        let leftChildren := (children.extract 0 i).push cLeft
-        let rightChildren := (#[cRight]).append (children.extract (i + 1) children.size)
-
-        let leftFiltered := leftChildren.filter (fun c => c.length > 0)
-        let rightFiltered := rightChildren.filter (fun c => c.length > 0)
-
-        (mkInternal leftFiltered, mkInternal rightFiltered)
-      else
-        splitAux children offset pt (i + 1) (accOff + c.length)
-    else
-      (mkInternal children, empty)
-  termination_by (sizeOf children, children.size - i)
-  decreasing_by
-    all_goals simp_wf
-    -- splitAux -> split (c)
-    · apply Prod.Lex.left
-      cases children with | mk data =>
-      have lt_list : sizeOf (data.get ⟨i, h⟩) < sizeOf data :=
-        List.sizeOf_lt_of_mem (List.get_mem data ⟨i, h⟩)
-      have lt_array : sizeOf data < sizeOf (Array.mk data) := by
-        grind only [Array.mk.sizeOf_spec]
-      exact Nat.lt_trans lt_list lt_array
-
-    -- splitAux -> splitAux (i+1)
-    · apply Prod.Lex.right
-      apply Nat.sub_lt_sub_left
-      · exact h
-      · exact Nat.lt_succ_self _
-end
-
-/-- Delete range [offset, offset + length) -/
-def delete (t : PieceTree) (offset : Nat) (length : Nat) (pt : PieceTable) : PieceTree :=
-  if length == 0 then t
-  else
-    let (l, r) := split t offset pt
-    let (_, r') := split r length pt
-    concat l r'
-
-/-- Helper to scan pieces in a leaf for Nth newline -/
-def findNthNewlineLeaf (pieces : Array Piece) (n : Nat) (pt : PieceTable) (i : Nat) (accOffset : Nat) : Nat :=
-  if h : i < pieces.size then
-    let p := pieces[i]
-    if n < p.lineBreaks then
-      let buf := PieceTableHelper.getBuffer pt p.source
-      let rec scan (j : Nat) (cnt : Nat) : Nat :=
-        if j >= p.length then j
+      -- Insert l into r's left side
+      let firstChild := cs2[0]!
+      let newFirst := concat l firstChild
+      match newFirst with
+      | ViE.PieceTree.internal newChildren s =>
+        if s.height == h2 then
+           let combined := newChildren ++ (cs2.extract 1 cs2.size)
+           if combined.size <= ViE.NodeCapacity then mkInternal combined
+           else
+              let mid := combined.size / 2
+              mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
         else
-          if buf[p.start + j]! == 10 then
-            if cnt == n then j
-            else scan (j + 1) (cnt + 1)
-          else scan (j + 1) cnt
-      accOffset + (scan 0 0)
-    else
-      findNthNewlineLeaf pieces (n - p.lineBreaks) pt (i + 1) (accOffset + p.length)
-  else
-    accOffset
-termination_by pieces.size - i
+           mkInternal (#[newFirst] ++ (cs2.extract 1 cs2.size))
+      | _ => mkInternal (#[newFirst] ++ (cs2.extract 1 cs2.size))
 
-mutual
-  /-- Find offset of the N-th newline (0-indexed). -/
-  def findNthNewline (t : PieceTree) (n : Nat) (pt : PieceTable) : Nat :=
-    match t with
-    | empty => 0
-    | leaf pieces _ => findNthNewlineLeaf pieces n pt 0 0
-    | internal children _ => findNthNewlineAux children n pt 0 0
-  termination_by (sizeOf t, 0)
-  decreasing_by
-    simp_wf
-    -- findNthNewline -> findNthNewlineAux
-    apply Prod.Lex.left
-    simp +arith
+  -- Mixed types: wrap the smaller one and recurse
+  | ViE.PieceTree.leaf .. , ViE.PieceTree.internal .. => concat (mkInternal #[l]) r
+  | ViE.PieceTree.internal .. , ViE.PieceTree.leaf .. => concat l (mkInternal #[r])
 
-  def findNthNewlineAux (children : Array PieceTree) (n : Nat) (pt : PieceTable) (i : Nat) (accOffset : Nat) : Nat :=
-    if h : i < children.size then
-      let child := children[i]
-      let childLines := child.lineBreaks
-      if n < childLines then
-        accOffset + findNthNewline child n pt
+/-- Split the tree at a given byte offset -/
+partial def split (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) : (ViE.PieceTree × ViE.PieceTree) :=
+  match t with
+  | ViE.PieceTree.empty => (ViE.PieceTree.empty, ViE.PieceTree.empty)
+  | ViE.PieceTree.leaf pieces _ =>
+    let rec findSplitLeaf (i : Nat) (accOffset : Nat) : (ViE.PieceTree × ViE.PieceTree) :=
+      if i >= pieces.size then (t, ViE.PieceTree.empty)
       else
-        findNthNewlineAux children (n - childLines) pt (i + 1) (accOffset + child.length)
-    else
-      accOffset
-  termination_by (sizeOf children, children.size - i)
-  decreasing_by
-    all_goals simp_wf
-    -- findNthNewlineAux -> findNthNewline
-    · apply Prod.Lex.left
-      cases children with | mk data =>
-      have eq : (Array.mk data)[i] = data.get ⟨i, h⟩ := rfl
-      rw [eq]
-      have lt_list : sizeOf (data.get ⟨i, h⟩) < sizeOf data :=
-        List.sizeOf_lt_of_mem (List.get_mem data ⟨i, h⟩)
-      have lt_array : sizeOf data < sizeOf (Array.mk data) := by
-        grind only [Array.mk.sizeOf_spec]
-      exact Nat.lt_trans lt_list lt_array
-    -- findNthNewlineAux -> findNthNewlineAux
-    · apply Prod.Lex.right
-      apply Nat.sub_lt_sub_left
-      · exact h
-      · exact Nat.lt_succ_self _
-end
-
-
-/-- Get substring of tree from start to end offset -/
-partial def getSubstring (t : PieceTree) (startOff endOff : Nat) (pt : PieceTable) : String :=
-  if startOff >= endOff then ""
-  else
-    let rec traverse (t : PieceTree) (currentOff : Nat) : String :=
-      let tLen := t.length
-      if currentOff + tLen <= startOff || currentOff >= endOff then ""
-      else
-        match t with
-        | empty => ""
-        | leaf pieces _ =>
-           let rec scan (i : Nat) (off : Nat) (acc : String) : String :=
-             if i >= pieces.size then acc
-             else
-               let p := pieces[i]!
-               let pStart := off
-               let pEnd := off + p.length
-               let readStart := max startOff pStart
-               let readEnd := min endOff pEnd
-
-               if readStart < readEnd then
-                 let buf := PieceTableHelper.getBuffer pt p.source
-                 let sliceStart := p.start + (readStart - pStart)
-                 let sliceEnd := p.start + (readEnd - pStart)
-                 let str := String.fromUTF8! (buf.extract sliceStart sliceEnd)
-                 scan (i + 1) pEnd (acc ++ str)
-               else
-                 scan (i + 1) pEnd acc
-           scan 0 currentOff ""
-        | internal children _ =>
-           let rec scanInternal (i : Nat) (off : Nat) (acc : String) : String :=
-             if i >= children.size then acc
-             else
-               let c := children[i]!
-               let s := traverse c off
-               scanInternal (i + 1) (off + c.length) (acc ++ s)
-           scanInternal 0 currentOff ""
-    traverse t 0
-
-/-- Get total string length of a range (counting chars, not bytes, without allocation) -/
-partial def countCharsInRange (t : PieceTree) (startOff endOff : Nat) (pt : PieceTable) : Nat :=
-  if startOff >= endOff then 0
-  else
-    let rec traverse (t : PieceTree) (currentOff : Nat) : Nat :=
-      let tLen := t.length
-      if currentOff + tLen <= startOff || currentOff >= endOff then 0
-      else if currentOff >= startOff && currentOff + tLen <= endOff then
-        t.stats.chars
-      else
-        match t with
-        | empty => 0
-        | leaf pieces _ =>
-           let rec scan (i : Nat) (off : Nat) (acc : Nat) : Nat :=
-             if i >= pieces.size then acc
-             else
-               let p := pieces[i]!
-               let pStart := off
-               let pEnd := off + p.length
-               if pEnd <= startOff || pStart >= endOff then
-                 scan (i + 1) pEnd acc
-               else if pStart >= startOff && pEnd <= endOff then
-                 scan (i + 1) pEnd (acc + p.charCount)
-               else
-                 let readStart := max startOff pStart
-                 let readEnd := min endOff pEnd
-                 let buf := PieceTableHelper.getBuffer pt p.source
-                 let sliceStart := p.start + (readStart - pStart)
-                 let sliceLen := readEnd - readStart
-                 let cnt := ViE.Unicode.countChars buf sliceStart sliceLen
-                 scan (i + 1) pEnd (acc + cnt)
-           scan 0 currentOff 0
-        | internal children _ =>
-           let rec scanInternal (i : Nat) (off : Nat) (acc : Nat) : Nat :=
-             if i >= children.size then acc
-             else
-               let c := children[i]!
-               let s := traverse c off
-               scanInternal (i + 1) (off + c.length) (acc + s)
-           scanInternal 0 currentOff 0
-    traverse t 0
-
-/-- Get line char length (0-indexed). Excludes newline at end of line. -/
-def getLineLength (t : PieceTree) (lineIdx : Nat) (pt : PieceTable) : Option Nat :=
-  let totalLines := t.lineBreaks
-  if lineIdx > totalLines then none
-  else
-    let startOffset := if lineIdx == 0 then 0 else findNthNewline t (lineIdx - 1) pt + 1
-    let endOffset :=
-      if lineIdx == totalLines then
-        t.length
-      else
-        findNthNewline t lineIdx pt
-    some (countCharsInRange t startOffset endOffset pt)
-
-def getLine (t : PieceTree) (lineIdx : Nat) (pt : PieceTable) : Option String :=
-  let totalLines := t.lineBreaks
-  if lineIdx > totalLines then none
-  else
-    let startOffset := if lineIdx == 0 then 0 else findNthNewline t (lineIdx - 1) pt + 1
-    let endOffset :=
-      if lineIdx == totalLines then
-        t.length
-      else
-        findNthNewline t lineIdx pt
-    some (getSubstring t startOffset endOffset pt)
-
-/-- Get line range (start, length) -/
-def getLineRange (t : PieceTree) (lineIdx : Nat) (pt : PieceTable) : Option (Nat × Nat) :=
-  let totalLines := t.lineBreaks
-  if lineIdx > totalLines then none
-  else
-    let startOffset := if lineIdx == 0 then 0 else findNthNewline t (lineIdx - 1) pt + 1
-    let endOffset :=
-      if lineIdx == totalLines then
-        t.length
-      else
-        findNthNewline t lineIdx pt
-    some (startOffset, endOffset - startOffset)
-
-/-- Build a tree from a list of pieces (Bottom-Up construction) -/
-partial def fromPieces (pieces : Array Piece) : PieceTree :=
-  if pieces.isEmpty then empty
-  else
-    -- Step 1: Create Leaves
-    let rec mkLeaves (i : Nat) (acc : Array PieceTree) : Array PieceTree :=
-      if i >= pieces.size then acc
-      else
-        let chunk := pieces.extract i (i + NodeCapacity)
-        let leaf := mkLeaf chunk
-        mkLeaves (i + NodeCapacity) (acc.push leaf)
-
-    let leaves := mkLeaves 0 #[]
-
-    -- Step 2: Build Internal Nodes recursively
-    let rec buildLevel (nodes : Array PieceTree) : PieceTree :=
-      if nodes.size == 1 then
-        nodes[0]!
-      else
-        let rec mkNextLevel (i : Nat) (acc : Array PieceTree) : Array PieceTree :=
-          if i >= nodes.size then acc
+        let p := pieces[i]!
+        if offset < accOffset + p.length then
+          let relOffset := offset - accOffset
+          if relOffset == 0 then
+             (mkLeaf (pieces.extract 0 i), mkLeaf (pieces.extract i pieces.size))
           else
-            let chunk := nodes.extract i (i + NodeCapacity)
-            let node := mkInternal chunk
-            mkNextLevel (i + NodeCapacity) (acc.push node)
+             let (p1, p2) := PieceTableHelper.splitPiece p relOffset pt
+             (mkLeaf ((pieces.extract 0 i).push p1), mkLeaf (#[p2] ++ (pieces.extract (i + 1) pieces.size)))
+        else
+          findSplitLeaf (i + 1) (accOffset + p.length)
+    findSplitLeaf 0 0
+  | ViE.PieceTree.internal children _ =>
+    let rec findSplitInternal (i : Nat) (accOffset : Nat) : (ViE.PieceTree × ViE.PieceTree) :=
+      if i >= children.size then (t, ViE.PieceTree.empty)
+      else
+        let c := children[i]!
+        let cLen := length c
+        if offset < accOffset + cLen then
+          let (l, r) := split c (offset - accOffset) pt
+          let leftSide := mkInternal ((children.extract 0 i).push l)
+          let rightSide := mkInternal (#[r] ++ (children.extract (i + 1) children.size))
+          (leftSide, rightSide)
+        else
+          findSplitInternal (i + 1) (accOffset + cLen)
+    findSplitInternal 0 0
 
-        buildLevel (mkNextLevel 0 #[])
+/-- Delete range from tree -/
+def delete (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : ViE.PieceTree :=
+  let (l, mid_r) := split t offset pt
+  let (_, r) := split mid_r len pt
+  concat l r
 
-    buildLevel leaves
+/-- Get substring from tree -/
+partial def getSubstring (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : String :=
+  let rec collect (t : ViE.PieceTree) (off : Nat) (l : Nat) (acc : Array ByteArray) : (Array ByteArray × Nat) :=
+    if l == 0 then (acc, 0)
+    else match t with
+      | ViE.PieceTree.empty => (acc, 0)
+      | ViE.PieceTree.leaf pieces _ =>
+        let rec scanLeaf (i : Nat) (accOffset : Nat) (currAcc : Array ByteArray) (remain : Nat) : (Array ByteArray × Nat) :=
+          if i >= pieces.size || remain == 0 then (currAcc, l - remain)
+          else
+            let p := pieces[i]!
+            let pLen := p.length
+            if off < accOffset + pLen then
+              let pStart := if off > accOffset then off - accOffset else 0
+              let readLen := min remain (pLen - pStart)
+              let buf := PieceTableHelper.getBuffer pt p.source
+              let slice := buf.extract (p.start + pStart) (p.start + pStart + readLen)
+              scanLeaf (i + 1) (accOffset + pLen) (currAcc.push slice) (remain - readLen)
+            else
+              scanLeaf (i + 1) (accOffset + pLen) currAcc remain
+        scanLeaf 0 0 acc l
+      | ViE.PieceTree.internal children _ =>
+        let rec scanInternal (i : Nat) (accOffset : Nat) (currAcc : Array ByteArray) (remain : Nat) : (Array ByteArray × Nat) :=
+          if i >= children.size || remain == 0 then (currAcc, l - remain)
+          else
+            let c := children[i]!
+            let cLen := length c
+            if off < accOffset + cLen then
+              let cStart := if off > accOffset then off - accOffset else 0
+              let (newAcc, readInThisChild) := collect c cStart remain currAcc
+              scanInternal (i + 1) (accOffset + cLen) newAcc (remain - readInThisChild)
+            else
+              scanInternal (i + 1) (accOffset + cLen) currAcc remain
+        scanInternal 0 0 acc l
+  let (chunks, _) := collect t offset len #[]
+  let combined := chunks.foldl (fun (acc : ByteArray) (b : ByteArray) => acc ++ b) (ByteArray.mk #[])
+  String.fromUTF8! combined
+
+/-- Find the leaf and relative offset containing the Nth newline -/
+partial def findNthNewlineLeaf (t : ViE.PieceTree) (n : Nat) (pt : ViE.PieceTable) : Option (ViE.Piece × Nat × Nat) :=
+  let rec scan (t : ViE.PieceTree) (n : Nat) (accOffset : Nat) : Option (ViE.Piece × Nat × Nat) :=
+    match t with
+    | ViE.PieceTree.empty => none
+    | ViE.PieceTree.leaf pieces _ =>
+      let rec findInPieces (i : Nat) (currN : Nat) (currOff : Nat) : Option (ViE.Piece × Nat × Nat) :=
+        if i >= pieces.size then none
+        else
+          let p := pieces[i]!
+          if currN < p.lineBreaks then
+            let buf := PieceTableHelper.getBuffer pt p.source
+            let rec findOffset (j : Nat) (targetN : Nat) : Nat :=
+              if j >= p.length then p.length
+              else if buf[p.start + j]! == 10 then
+                if targetN == 0 then j + 1
+                else findOffset (j + 1) (targetN - 1)
+              else findOffset (j + 1) targetN
+            let relOffset := findOffset 0 currN
+            some (p, currOff, relOffset)
+          else
+            findInPieces (i + 1) (currN - p.lineBreaks) (currOff + p.length)
+      findInPieces 0 n accOffset
+    | ViE.PieceTree.internal children _ =>
+      let rec findInChildren (i : Nat) (currN : Nat) (currOff : Nat) : Option (ViE.Piece × Nat × Nat) :=
+        if i >= children.size then none
+        else
+          let child := children[i]!
+          let childLines := lineBreaks child
+          if currN < childLines then
+            scan child currN currOff
+          else
+            findInChildren (i + 1) (currN - childLines) (currOff + length child)
+      findInChildren 0 n accOffset
+  scan t n 0
+
+/-- Get range of a line in byte offsets -/
+def getLineRange (t : ViE.PieceTree) (lineIdx : Nat) (pt : ViE.PieceTable) : Option (Nat × Nat) :=
+  if lineIdx == 0 then
+    let start := 0
+    let endOff := match findNthNewlineLeaf t 0 pt with
+      | some (_, acc, rel) => acc + rel - 1
+      | none => length t
+    some (start, endOff)
+  else
+    match findNthNewlineLeaf t (lineIdx - 1) pt with
+    | some (_, acc, rel) =>
+      let start := acc + rel
+      let endOff := match findNthNewlineLeaf t lineIdx pt with
+        | some (_, acc2, rel2) => acc2 + rel2 - 1
+        | none => length t
+      some (start, endOff - start)
+    | none => none
+
+def getLine (t : ViE.PieceTree) (lineIdx : Nat) (pt : ViE.PieceTable) : Option String :=
+  match getLineRange t lineIdx pt with
+  | some (off, len) => some (getSubstring t off len pt)
+  | none => none
+
+def getLineLength (t : ViE.PieceTree) (lineIdx : Nat) (pt : ViE.PieceTable) : Option Nat :=
+  match getLineRange t lineIdx pt with
+  | some (_, len) => some len
+  | none => none
 
 end PieceTree
 

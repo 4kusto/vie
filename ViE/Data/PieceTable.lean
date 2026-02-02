@@ -1,26 +1,22 @@
 import ViE.Data.PieceTable.Piece
-import ViE.Data.PieceTable.Types
 import ViE.Data.PieceTable.Tree
 
 namespace ViE
 
-/-- Chunk size for splitting large files (16KB) -/
-def PieceTable.ChunkSize : Nat := 1024 * 16
-
 /-- Construct from bytes -/
 def PieceTable.fromByteArray (bytes : ByteArray) : PieceTable :=
   if bytes.size == 0 then
-    { original := bytes, add := ByteArray.empty, tree := PieceTree.empty, undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
+    { original := bytes, addBuffers := #[], tree := PieceTree.empty, undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
   else
     -- Split bytes into chunks to avoid monolithic pieces
     let totalSize := bytes.size
     let rec splitChunks (start : Nat) (acc : Array Piece) : Array Piece :=
       if start >= totalSize then acc
       else
-        let len := min PieceTable.ChunkSize (totalSize - start)
-        let lines := ViE.Unicode.countNewlines bytes start len
-        let chars := ViE.Unicode.countChars bytes start len
-        let piece := { source := .original, start := start, length := len, lineBreaks := lines, charCount := chars }
+        let len := min ChunkSize (totalSize - start)
+        let lines := Unicode.countNewlines bytes start len
+        let chars := Unicode.countChars bytes start len
+        let piece : Piece := { source := BufferSource.original, start := start, length := len, lineBreaks := lines, charCount := chars }
         splitChunks (start + len) (acc.push piece)
     termination_by totalSize - start
     decreasing_by
@@ -31,15 +27,15 @@ def PieceTable.fromByteArray (bytes : ByteArray) : PieceTable :=
       · have h1 : 0 < totalSize - start := Nat.sub_pos_of_lt h
         apply Nat.lt_min.mpr
         constructor
-        . show 0 < PieceTable.ChunkSize
-          unfold PieceTable.ChunkSize
+        . show 0 < ChunkSize
+          unfold ChunkSize
           exact Nat.zero_lt_succ _
         · assumption
       · apply Nat.min_le_right
 
     let pieces := splitChunks 0 #[]
     let tree := PieceTree.fromPieces pieces
-    { original := bytes, add := ByteArray.empty, tree := tree, undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
+    { original := bytes, addBuffers := #[], tree := tree, undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
 
 /-- Construct from initial string -/
 def PieceTable.fromString (s : String) : PieceTable :=
@@ -51,66 +47,64 @@ def PieceTable.toString (pt : PieceTable) : String :=
 
 /--
   Insert text at the specified offset.
-
-  params:
-  - offset: The byte offset where insertion begins.
-  - text: The string content to insert.
-  - cursorOffset: The cursor position *after* this insertion, stored in the undo stack
-    to restore cursor position when undoing this operation.
 -/
 def PieceTable.insert (pt : PieceTable) (offset : Nat) (text : String) (cursorOffset : Nat) : PieceTable :=
   if text.isEmpty then pt
   else
-    let (pt', newPiece) := PieceTableHelper.appendText pt text
+    let (pt', newPieces) := PieceTableHelper.appendText pt text
     let (l, r) := PieceTree.split pt.tree offset pt'
-    let mid := PieceTree.mkLeaf #[newPiece]
+    let mid := PieceTree.fromPieces newPieces
     let newTree := PieceTree.concat (PieceTree.concat l mid) r
 
     -- Check optimization/merge compatibility
-    let (finalUndoStack, newLastInsert) :=
+    let (finalUndoStack, newUndoCount, newLastInsert) :=
       match pt.lastInsert with
-      | some (lastOff, lastAddOff) =>
-        if offset == lastOff && lastAddOff == pt.add.size then
+      | some last =>
+        let lastBuf := pt.addBuffers.getD last.bufferIdx ByteArray.empty
+        let isContig := offset == last.docOffset
+        let isLastBuf := last.bufferIdx == pt.addBuffers.size - 1
+        let isEndOfBuf := last.bufferOffset == lastBuf.size
+
+        if isContig && isLastBuf && isEndOfBuf then
           -- MERGE: Contiguous edit in doc and add buffer.
           -- Don't push to undoStack (reuse previous state as undo point)
-          (pt.undoStack, some (offset + text.utf8ByteSize, lastAddOff + text.utf8ByteSize))
+          (pt.undoStack, pt.undoStackCount, some { docOffset := offset + text.toUTF8.size, bufferIdx := pt.addBuffers.size, bufferOffset := text.toUTF8.size })
         else
           -- NO MERGE: Push current state
           let stack := (pt.tree, cursorOffset) :: pt.undoStack
-          let params := if stack.length > pt.undoLimit then stack.take pt.undoLimit else stack
-          (params, some (offset + text.utf8ByteSize, pt.add.size + text.utf8ByteSize))
+          let newCount := pt.undoStackCount + 1
+          let (finalStack, finalCount) := if newCount > pt.undoLimit then (stack.take pt.undoLimit, pt.undoLimit) else (stack, newCount)
+          (finalStack, finalCount, some { docOffset := offset + text.toUTF8.size, bufferIdx := pt.addBuffers.size, bufferOffset := text.toUTF8.size })
       | none =>
           let stack := (pt.tree, cursorOffset) :: pt.undoStack
-          let params := if stack.length > pt.undoLimit then stack.take pt.undoLimit else stack
-          (params, some (offset + text.utf8ByteSize, pt.add.size + text.utf8ByteSize))
+          let newCount := pt.undoStackCount + 1
+          let (finalStack, finalCount) := if newCount > pt.undoLimit then (stack.take pt.undoLimit, pt.undoLimit) else (stack, newCount)
+          (finalStack, finalCount, some { docOffset := offset + text.toUTF8.size, bufferIdx := pt.addBuffers.size, bufferOffset := text.toUTF8.size })
 
     { pt' with
       tree := newTree
       undoStack := finalUndoStack
+      undoStackCount := newUndoCount
       redoStack := []
+      redoStackCount := 0
       lastInsert := newLastInsert
     }
 
-/--
-  Delete a range of text.
-
-  params:
-  - offset: The starting byte offset of the range to delete.
-  - length: The number of bytes to delete.
-  - cursorOffset: The cursor position *after* this deletion, stored in the undo stack
-    to restore cursor position when undoing this operation.
--/
+/-- Delete a range of text. -/
 def PieceTable.delete (pt : PieceTable) (offset : Nat) (length : Nat) (cursorOffset : Nat) : PieceTable :=
   if length == 0 then pt
   else
     let newTree := PieceTree.delete pt.tree offset length pt
     let stack := (pt.tree, cursorOffset) :: pt.undoStack
-    let finalStack := if stack.length > pt.undoLimit then stack.take pt.undoLimit else stack
+    let newCount := pt.undoStackCount + 1
+    let (finalStack, finalCount) := if newCount > pt.undoLimit then (stack.take pt.undoLimit, pt.undoLimit) else (stack, newCount)
 
     { pt with
       tree := newTree
       undoStack := finalStack
+      undoStackCount := finalCount
       redoStack := []
+      redoStackCount := 0
       lastInsert := none -- Break merge chain
     }
 
@@ -126,7 +120,9 @@ def PieceTable.undo (pt : PieceTable) (currentCursor : Nat) : PieceTable × Opti
     ({ pt with
       tree := prev
       undoStack := rest
+      undoStackCount := pt.undoStackCount - 1
       redoStack := (pt.tree, currentCursor) :: pt.redoStack
+      redoStackCount := pt.redoStackCount + 1
       lastInsert := none
     }, some prevCursor)
 
@@ -138,7 +134,9 @@ def PieceTable.redo (pt : PieceTable) (currentCursor : Nat) : PieceTable × Opti
     ({ pt with
       tree := next
       undoStack := (pt.tree, currentCursor) :: pt.undoStack
+      undoStackCount := pt.undoStackCount + 1
       redoStack := rest
+      redoStackCount := pt.redoStackCount - 1
       lastInsert := none
     }, some nextCursor)
 
@@ -158,28 +156,29 @@ def PieceTable.getLineLength (pt : PieceTable) (lineIdx : Nat) : Option Nat :=
 def PieceTable.getOffsetFromPoint (pt : PieceTable) (row col : Nat) : Option Nat :=
   match PieceTable.getLineRange pt row with
   | some (startOff, len) =>
-      -- Allow col up to len (inclusive) for appending at end of line
+      -- Allow col up to len (inclusive)
       if col <= len then some (startOff + col)
-      else if col == len + 1 then some (startOff + len) -- Lenient for cursor logic? No, strict.
-      else some (startOff + len) -- Clamp to end of line if strictly greater? Better to be safe.
+      else some (startOff + len)
   | none => none
 
-def PieceTable.lineCount (pt : PieceTable) : Nat :=
-  match pt.tree with
-  | .leaf _ s => s.lines + 1
-  | .internal _ s => s.lines + 1
-  | .empty => 1
 
-def PieceTable.length (pt : PieceTable) : Nat := pt.tree.length
+def PieceTable.length (pt : PieceTable) : Nat := (PieceTree.stats pt.tree).bytes
 
-/-- Check if the piece table buffer ends with a newline character.
-    Optimized to avoid converting the entire buffer to string. -/
+/-- Check if the piece table buffer ends with a newline character. -/
 def PieceTable.endsWithNewline (pt : PieceTable) : Bool :=
   let len := pt.length
   if len == 0 then false
   else
-    let s := PieceTree.getSubstring pt.tree (len - 1) len pt
+    let s := PieceTree.getSubstring pt.tree (len - 1) 1 pt
     s == "\n"
+
+def PieceTable.lineCount (pt : PieceTable) : Nat :=
+  let breaks := PieceTree.lineBreaks pt.tree
+  if breaks == 0 then 1
+  -- If the file ends with a newline, Vim doesn't count it as a new empty line
+  -- unless it's preceded by another newline (e.g., "a\n\n" is 2 lines).
+  else if pt.endsWithNewline then breaks
+  else breaks + 1
 
 partial def PieceTable.findLineForOffset (pt : PieceTable) (target : Nat) (low high : Nat) : Option (Nat × Nat) :=
   if low > high then none

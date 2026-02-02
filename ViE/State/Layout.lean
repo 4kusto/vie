@@ -14,7 +14,7 @@ def EditorState.updateCurrentWorkgroup (s : EditorState) (f : WorkgroupState →
 
 /-- Switch to workgroup n -/
 def EditorState.switchToWorkgroup (s : EditorState) (n : Nat) : EditorState :=
-  if n < 10 then
+  if n < s.workgroups.size then
     { s with currentGroup := n }
   else
     s

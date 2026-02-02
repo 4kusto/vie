@@ -14,7 +14,7 @@ def defaultStatus := (ViE.Color.toBg <|
 
 def defaultWorkspace : Workspace := {
   rootPath := none
-  displayName := "ViE"
+  name := "ViE"
 }
 
 def defaultConfig : EditorConfig := {
@@ -55,6 +55,7 @@ def initialView : ViewState := {
 }
 
 def initialWorkgroupState : WorkgroupState := {
+  name := "1"
   buffers := [initialBuffer]
   nextBufferId := 1
   layout := .window 0 initialView
@@ -62,7 +63,8 @@ def initialWorkgroupState : WorkgroupState := {
   nextWindowId := 1
 }
 
-def createEmptyWorkgroup (nextBufId : Nat) : WorkgroupState := {
+def createEmptyWorkgroup (name : String) (nextBufId : Nat) : WorkgroupState := {
+  name := name
   buffers := [{ initialBuffer with id := nextBufId }]
   nextBufferId := nextBufId + 1
   layout := .window 0 initialView
@@ -73,7 +75,7 @@ def createEmptyWorkgroup (nextBufId : Nat) : WorkgroupState := {
 
 /-- Helper to create an array of initial workgroup states -/
 def makeInitialWorkgroups : Array WorkgroupState :=
-  Array.mk (List.replicate 10 initialWorkgroupState)
+  #[initialWorkgroupState]
 
 
 def initialState : EditorState := {

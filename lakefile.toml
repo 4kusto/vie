@@ -16,3 +16,11 @@ root = "Main"
 [[lean_exe]]
 name = "test"
 root = "Test"
+
+[[lean_exe]]
+name = "bench"
+root = "Test.Benchmark"
+
+[[lean_exe]]
+name = "tree-stats"
+root = "Test.TreeStats"

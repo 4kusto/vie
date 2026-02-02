@@ -101,8 +101,6 @@ def test : IO Unit := do
   let (u2, _) := u1.undo 0
   assert "Oldest undo dropped" (u2.toString == "AHello, World! New Again")
 
-  assert "Oldest undo dropped" (u2.toString == "AHello, World! New Again")
-
   -- 11. Test Paste Undo Grouping (Reproduction)
   -- Scenario: Paste "P1" then Paste "P2". They should NOT merge if we signal a break,
   -- OR if we consider pastes as distinct operations that shouldn't auto-merge like typing.

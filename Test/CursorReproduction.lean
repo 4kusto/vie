@@ -4,7 +4,7 @@ import ViE.Command.Impl
 import ViE.Key.Map
 import ViE.State.Edit
 
-namespace Test.BugReproduction
+namespace Test.CursorReproduction
 
 open ViE
 
@@ -31,7 +31,7 @@ def runKeys (startState : EditorState) (keys : List Key) : IO EditorState := do
   return s
 
 def test : IO Unit := do
-  IO.println "Starting Bug Reproduction Test..."
+  IO.println "Starting Cursor Reproduction Test..."
   let s := ViE.initialState
 
   -- Scenario: Insert, Undo, Insert
@@ -63,7 +63,7 @@ def test : IO Unit := do
   let s := ViE.initialState
   let s := s.insertChar 'x'
   let s := s.yankCurrentLine -- Yank 'x\n'
-  let s := s.pasteBelow -- Paste 'x\n' -> 'x\nx\n' ??
+  let _s := s.pasteBelow -- Paste 'x\n' -> 'x\nx\n' ??
   -- PasteBelow pastes line.
 
   -- Scenario: x command
@@ -85,6 +85,6 @@ def test : IO Unit := do
   else
      IO.println "[PASS] 'x' command works"
 
-  IO.println "Bug Reproduction Test Finished"
+  IO.println "Cursor Reproduction Test Finished"
 
-end Test.BugReproduction
+end Test.CursorReproduction
