@@ -1,8 +1,9 @@
+import Lean
 import ViE.Types
 import ViE.Data.PieceTable
 
 namespace ViE
-open ViE.PieceTable
+
 
 /-- Load buffer from file using PieceTable -/
 def loadBufferByteArray (filename : String) : IO FileBuffer := do
@@ -17,6 +18,7 @@ def loadBufferByteArray (filename : String) : IO FileBuffer := do
           dirty := false
           table := PieceTable.fromString ""
           missingEol := false
+          cache := { lineMap := Lean.RBMap.empty }
         }
       else
         -- Read file as ByteArray
@@ -33,6 +35,7 @@ def loadBufferByteArray (filename : String) : IO FileBuffer := do
           dirty := false
           table := table
           missingEol := missingEol
+          cache := { lineMap := Lean.RBMap.empty }
         }
     else
       -- File doesn't exist, return empty buffer
@@ -42,6 +45,7 @@ def loadBufferByteArray (filename : String) : IO FileBuffer := do
         dirty := false
         table := PieceTable.fromString ""
         missingEol := false
+        cache := { lineMap := Lean.RBMap.empty }
       }
   catch _ =>
     -- On error, return empty buffer
@@ -51,6 +55,7 @@ def loadBufferByteArray (filename : String) : IO FileBuffer := do
       dirty := false
       table := PieceTable.fromString ""
       missingEol := false
+      cache := { lineMap := Lean.RBMap.empty }
     }
 
 end ViE

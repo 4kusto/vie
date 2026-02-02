@@ -15,7 +15,29 @@ open ViE.Key
 
 /-- Default key bindings. -/
 def makeKeyMap (commands : CommandMap) : KeyMap := {
-  normal := fun s k => match k with
+  normal := fun s k =>
+  let handleMotion (state : EditorState) (motion : EditorState → EditorState) : IO EditorState :=
+      let n := if state.getCount == 0 then 1 else state.getCount
+      let rec applyN (st : EditorState) (count : Nat) : EditorState :=
+        match count with
+        | 0 => st
+        | n + 1 => applyN (motion st) n
+      termination_by count
+
+      match state.inputState.previousKey with
+      | none => pure $ clearInput (EditorState.clampCursor (applyN state n))
+      | some 'd' =>
+          let start := state.getCursor
+          let endP := (applyN state n).getCursor
+          pure $ clearInput (state.deleteRange start endP)
+      | some 'c' =>
+          let start := state.getCursor
+          let endP := (applyN state n).getCursor
+          pure $ clearInput (state.deleteRange start endP |>.setMode Mode.insert)
+      | _ => pure $ clearInput (EditorState.clampCursor (applyN state n))
+
+
+  match k with
   | Key.char 'h' =>
       -- Check if in explorer buffer
       let buf := s.getActiveBuffer
@@ -32,10 +54,11 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
           ViE.Command.executeCommand commands s'
         | none => pure $ clearInput (EditorState.moveCursorLeftN s s.getCount)
       else
-        pure $ clearInput (EditorState.moveCursorLeftN s s.getCount)
-  | Key.char 'j' => pure $ clearInput (EditorState.moveCursorDownN s s.getCount)
-  | Key.char 'k' => pure $ clearInput (EditorState.moveCursorUpN s s.getCount)
-  | Key.char 'l' => pure $ clearInput (EditorState.moveCursorRightN s s.getCount)
+
+        handleMotion s EditorState.moveCursorLeft
+  | Key.char 'j' => handleMotion s EditorState.moveCursorDown
+  | Key.char 'k' => handleMotion s EditorState.moveCursorUp
+  | Key.char 'l' => handleMotion s EditorState.moveCursorRight
   | Key.enter => ViE.Feature.handleExplorerEnter s
   | Key.char 'i' => pure $ s.setMode Mode.insert
   | Key.char 'a' =>
@@ -51,10 +74,18 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
   | Key.char 'v' => pure $ EditorState.startVisualMode s
   | Key.char 'V' => pure $ EditorState.startVisualBlockMode s
   | Key.char '0' =>
-     if s.inputState.countBuffer.isEmpty then pure $ clearInput (EditorState.moveToLineStart s)
+     if s.inputState.countBuffer.isEmpty then handleMotion s EditorState.moveToLineStart
      else
         pure { s with inputState := { s.inputState with countBuffer := s.inputState.countBuffer.push '0' } }
-  | Key.char '$' => pure $ clearInput (EditorState.moveToLineEnd s)
+  | Key.char '$' => handleMotion s EditorState.moveToLineEnd
+
+  | Key.char 'w' =>
+      match s.inputState.previousKey with
+      | some 'c' => pure $ clearInput (s.changeWord)
+      | _ => handleMotion s EditorState.moveWordForward
+  | Key.char 'b' => handleMotion s EditorState.moveWordBackward
+  | Key.char 'e' => handleMotion s EditorState.moveWordEnd
+  | Key.char 'x' => pure $ clearInput (EditorState.deleteCharAfterCursor s)
   | Key.char 'p' => pure $ clearInput (EditorState.pasteBelow s)
   | Key.char 'P' => pure $ clearInput (EditorState.pasteAbove s)
   | Key.char 'y' =>
@@ -64,10 +95,19 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
   | Key.char '|' =>
     let n := s.getCount
     pure $ clearInput (EditorState.jumpToColumn s n)
+  | Key.char 'c' =>
+    match s.inputState.previousKey with
+    | some 'c' =>
+        -- cc: delete line and enter insert mode
+        -- For now, approximate with delete line. Ideally should preserve line as empty.
+        pure $ (s.deleteCurrentLine).setMode Mode.insert
+    | _ => pure { s with inputState := { s.inputState with previousKey := some 'c' } }
   | Key.char 'd' =>
     match s.inputState.previousKey with
     | some 'd' => pure $ s.deleteCurrentLine
     | _ => pure { s with inputState := { s.inputState with previousKey := some 'd' } }
+  | Key.char 'u' => pure $ s.undo
+  | Key.ctrl 'r' => pure $ s.redo
   | Key.ctrl 'w' =>
       pure { s with inputState := { s.inputState with previousKey := some '\x17' } }
   | Key.char c =>
@@ -97,17 +137,16 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
             let prev := if s.currentGroup == 0 then 9 else s.currentGroup - 1
             let s'' := s.switchToWorkgroup prev
             pure { s'' with message := s!"Switched to workgroup {prev}" }
+         | 'g' =>
+            -- gg implementation
+            let n := s.getCount
+            let line := if n > 0 then n else 1
+            pure $ clearInput (EditorState.jumpToLine s line)
          | _ => pure s'
       else
          match c with
          | 'g' =>
-            match s.inputState.previousKey with
-            | some 'g' =>
-               -- gg implementation
-               let n := s.getCount
-               let line := if n > 0 then n else 1
-               pure $ clearInput (EditorState.jumpToLine s line)
-            | _ => pure { s with inputState := { s.inputState with previousKey := some 'g' } }
+             pure { s with inputState := { s.inputState with previousKey := some 'g' } }
          | 'G' =>
             let line := match s.inputState.countBuffer.toNat? with
               | some n => n
@@ -133,7 +172,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
   | _ => pure { s with inputState := { s.inputState with countBuffer := "", previousKey := none } },
 
   insert := fun s k => match k with
-    | Key.esc => pure $ s.setMode Mode.normal
+    | Key.esc => pure $ (s.commitEdit.moveCursorLeft).setMode Mode.normal
     | Key.backspace => pure $ s.deleteBeforeCursor
     | Key.char c => pure $ s.insertChar c
     | Key.enter => pure s.insertNewline
@@ -148,6 +187,9 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
     | Key.char 'j' => pure $ clearInput (EditorState.moveCursorDownN s s.getCount)
     | Key.char 'k' => pure $ clearInput (EditorState.moveCursorUpN s s.getCount)
     | Key.char 'l' => pure $ clearInput (EditorState.moveCursorRightN s s.getCount)
+    | Key.char 'w' => pure $ clearInput (EditorState.moveWordForward s)
+    | Key.char 'b' => pure $ clearInput (EditorState.moveWordBackward s)
+    | Key.char 'e' => pure $ clearInput (EditorState.moveWordEnd s)
     | Key.char '0' => pure $ clearInput (EditorState.moveToLineStart s)
     | Key.char '$' => pure $ clearInput (EditorState.moveToLineEnd s)
     | Key.char 'G' =>

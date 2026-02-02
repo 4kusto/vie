@@ -33,7 +33,10 @@ def openBuffer (state : EditorState) (filename : String) : IO EditorState := do
       -- Assign new ID and add to workgroup
       let s' := state.updateCurrentWorkgroup fun wg =>
         let id := wg.nextBufferId
-        let buf := { loadedBuf with id := id }
+        let buf := { loadedBuf with
+          id := id
+          table := { loadedBuf.table with undoLimit := state.config.historyLimit }
+        }
         { wg with buffers := buf :: wg.buffers, nextBufferId := id + 1 }
 
       let wg := s'.getCurrentWorkgroup

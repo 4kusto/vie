@@ -75,20 +75,16 @@ def EditorState.getActiveBuffer (s : EditorState) : FileBuffer :=
   | some v => wg.buffers.find? (fun b => b.id == v.bufferId) |>.getD initialBuffer
   | none => initialBuffer
 
-def EditorState.activeBufferContent (s : EditorState) : TextBuffer :=
-  ViE.Buffer.fileBufferToTextBuffer s.getActiveBuffer
 
 def EditorState.updateActiveBuffer (s : EditorState) (f : FileBuffer -> FileBuffer) : EditorState :=
   s.updateCurrentWorkgroup fun wg =>
     let view := wg.layout.findView wg.activeWindowId
     match view with
     | some v =>
-      let newBuffers := wg.buffers.map fun b => if b.id == v.bufferId then f b else b
+      let newBuffers := wg.buffers.map fun b => if b.id == v.bufferId then FileBuffer.clearCache (f b) else b
       { wg with buffers := newBuffers }
     | none => wg
 
-def EditorState.updateActiveBufferContent (s : EditorState) (f : TextBuffer → TextBuffer) : EditorState :=
-  s.updateActiveBuffer fun b => ViE.Buffer.fileBufferUpdateFromTextBuffer b (f (ViE.Buffer.fileBufferToTextBuffer b))
 
 def EditorState.getScroll (s : EditorState) : Row × Col :=
   let wg := s.getCurrentWorkgroup

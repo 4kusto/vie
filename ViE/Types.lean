@@ -1,9 +1,11 @@
+import Lean
 import ViE.Data.PieceTable
 
 namespace ViE
 
-open ViE.PieceTable
 
+
+/-- Editor Mode -/
 inductive Mode where
   | normal
   | insert
@@ -29,7 +31,7 @@ deriving Repr
 /-- Row index (0-based) with dimensional safety -/
 structure Row where
   val : Nat
-  deriving Repr, BEq, Ord
+  deriving Repr, BEq, Ord, Hashable
 
 /-- Column index (0-based) with dimensional safety -/
 structure Col where
@@ -47,48 +49,60 @@ namespace Row
   def zero : Row := ⟨0⟩
   def succ (r : Row) : Row := ⟨r.val + 1⟩
   def pred (r : Row) : Row := ⟨r.val.pred⟩
-  @[simp] def add (r : Row) (n : Nat) : Row := ⟨r.val + n⟩
-  @[simp] def sub (r : Row) (n : Nat) : Row := ⟨r.val - n⟩
-  instance : OfNat Row n := ⟨⟨n⟩⟩
-  instance : LT Row := ⟨fun a b => a.val < b.val⟩
-  instance : LE Row := ⟨fun a b => a.val ≤ b.val⟩
-  instance (a b : Row) : Decidable (a < b) := inferInstanceAs (Decidable (a.val < b.val))
-  instance (a b : Row) : Decidable (a ≤ b) := inferInstanceAs (Decidable (a.val ≤ b.val))
-  instance : Min Row := ⟨fun a b => if a.val ≤ b.val then a else b⟩
-  instance : Max Row := ⟨fun a b => if a.val ≥ b.val then a else b⟩
-  instance : HAdd Row Nat Row := ⟨fun r n => ⟨r.val + n⟩⟩
-  instance : HAdd Row Nat Nat := ⟨fun r n => r.val + n⟩
-  instance : HSub Row Row Nat := ⟨fun a b => a.val - b.val⟩
-  instance : HSub Row Nat Row := ⟨fun r n => ⟨r.val - n⟩⟩
-  instance : HSub Row Nat Nat := ⟨fun r n => r.val - n⟩
   instance : ToString Row := ⟨fun r => toString r.val⟩
 end Row
+
+instance : OfNat Row n := ⟨⟨n⟩⟩
+instance : LT Row := ⟨fun a b => a.val < b.val⟩
+instance : LE Row := ⟨fun a b => a.val ≤ b.val⟩
+instance (a b : Row) : Decidable (a < b) := inferInstanceAs (Decidable (a.val < b.val))
+instance (a b : Row) : Decidable (a ≤ b) := inferInstanceAs (Decidable (a.val ≤ b.val))
+instance : Min Row := ⟨fun a b => if a.val ≤ b.val then a else b⟩
+instance : Max Row := ⟨fun a b => if a.val ≥ b.val then a else b⟩
+instance : Add Row := ⟨fun a b => ⟨a.val + b.val⟩⟩
+instance : Sub Row := ⟨fun a b => ⟨a.val - b.val⟩⟩
+instance : HAdd Row Nat Row := ⟨fun r n => ⟨r.val + n⟩⟩
+instance : HSub Row Nat Row := ⟨fun r n => ⟨r.val - n⟩⟩
+instance : Coe Row Nat := ⟨(·.val)⟩
+
+instance : GetElem (List α) Row α (fun l r => r.val < l.length) where
+  getElem l r h := l[r.val]
+
+instance : GetElem (Array α) Row α (fun a r => r.val < a.size) where
+  getElem a r h := a[r.val]
 
 -- Col helper functions
 namespace Col
   def zero : Col := ⟨0⟩
   def succ (c : Col) : Col := ⟨c.val + 1⟩
   def pred (c : Col) : Col := ⟨c.val.pred⟩
-  @[simp] def add (c : Col) (n : Nat) : Col := ⟨c.val + n⟩
-  @[simp] def sub (c : Col) (n : Nat) : Col := ⟨c.val - n⟩
-  instance : OfNat Col n := ⟨⟨n⟩⟩
-  instance : LT Col := ⟨fun a b => a.val < b.val⟩
-  instance : LE Col := ⟨fun a b => a.val ≤ b.val⟩
-  instance (a b : Col) : Decidable (a < b) := inferInstanceAs (Decidable (a.val < b.val))
-  instance (a b : Col) : Decidable (a ≤ b) := inferInstanceAs (Decidable (a.val ≤ b.val))
-  instance : Min Col := ⟨fun a b => if a.val ≤ b.val then a else b⟩
-  instance : Max Col := ⟨fun a b => if a.val ≥ b.val then a else b⟩
-  instance : HAdd Col Nat Col := ⟨fun c n => ⟨c.val + n⟩⟩
-  instance : HAdd Col Nat Nat := ⟨fun c n => c.val + n⟩
-  instance : HSub Col Nat Col := ⟨fun c n => ⟨c.val - n⟩⟩
-  instance : HSub Col Col Nat := ⟨fun a b => a.val - b.val⟩
   instance : ToString Col := ⟨fun c => toString c.val⟩
 end Col
+
+instance : OfNat Col n := ⟨⟨n⟩⟩
+instance : LT Col := ⟨fun a b => a.val < b.val⟩
+instance : LE Col := ⟨fun a b => a.val ≤ b.val⟩
+instance (a b : Col) : Decidable (a < b) := inferInstanceAs (Decidable (a.val < b.val))
+instance (a b : Col) : Decidable (a ≤ b) := inferInstanceAs (Decidable (a.val ≤ b.val))
+instance : Min Col := ⟨fun a b => if a.val ≤ b.val then a else b⟩
+instance : Max Col := ⟨fun a b => if a.val ≥ b.val then a else b⟩
+instance : Add Col := ⟨fun a b => ⟨a.val + b.val⟩⟩
+instance : Sub Col := ⟨fun a b => ⟨a.val - b.val⟩⟩
+instance : HAdd Col Nat Col := ⟨fun c n => ⟨c.val + n⟩⟩
+instance : HSub Col Nat Col := ⟨fun c n => ⟨c.val - n⟩⟩
+instance : Coe Col Nat := ⟨(·.val)⟩
+
+instance : GetElem (List α) Col α (fun l c => c.val < l.length) where
+  getElem l c h := l[c.val]
+
+instance : GetElem (Array α) Col α (fun a c => c.val < a.size) where
+  getElem a c h := a[c.val]
 
 -- Point helper functions
 namespace Point
   def zero : Point := ⟨Row.zero, Col.zero⟩
-  def make (row col : Nat) : Point := ⟨⟨row⟩, ⟨col⟩⟩
+  def make (row : Row) (col : Col) : Point := ⟨row, col⟩
+  def fromNat (r c : Nat) : Point := ⟨⟨r⟩, ⟨c⟩⟩
 end Point
 
 -- Inhabited instances
@@ -111,6 +125,7 @@ structure EditorConfig where
   resetStyle : String
   fileIcon : String
   dirIcon : String
+  historyLimit : Nat := 100
   deriving Repr, Inhabited
 
 inductive Key where
@@ -124,12 +139,26 @@ inductive Key where
   | unknown (c : Char)
   deriving Repr, BEq, Inhabited
 
+structure RenderCache where
+  /-- Visual string for a line, cached to avoid re-calculating widths/tabs/etc. -/
+  lineMap : Lean.RBMap Row String compare
+  deriving Inhabited
+
+namespace RenderCache
+  def find (c : RenderCache) (r : Row) : Option String :=
+    c.lineMap.find? r
+
+  def update (c : RenderCache) (r : Row) (s : String) : RenderCache :=
+    { lineMap := c.lineMap.insert r s }
+end RenderCache
+
 structure FileBuffer where
   id : Nat
   filename : Option String
   dirty : Bool
   table : PieceTable
   missingEol : Bool
+  cache : RenderCache
   deriving Inhabited
 
 -- Manual Repr instance
@@ -143,11 +172,15 @@ def initialFileBuffer : FileBuffer := {
   dirty := false
   table := PieceTable.fromString ""
   missingEol := false
+  cache := { lineMap := Lean.RBMap.empty }
 }
 
 namespace FileBuffer
   def lineCount (buf : FileBuffer) : Nat :=
     PieceTree.lineBreaks buf.table.tree + 1
+
+  def clearCache (buf : FileBuffer) : FileBuffer :=
+    { buf with cache := { lineMap := Lean.RBMap.empty } }
 end FileBuffer
 
 structure ViewState where
@@ -207,7 +240,7 @@ structure EditorState where
   shouldQuit : Bool
   config : EditorConfig
   workspace : Workspace
-  clipboard : Option TextBuffer -- Yank buffer
+  clipboard : Option String -- Yank buffer (String instead of TextBuffer)
   selectionStart : Option Point -- Visual mode anchor
   explorers : List (Nat × ExplorerState) -- BufferId × Explorer state
   -- Temporary input state
@@ -250,5 +283,6 @@ structure SessionState where
   activeFileIndex : Nat
   cursors : List (Nat × Nat) -- Row, Col per file
   deriving Repr, Inhabited
+
 
 end ViE

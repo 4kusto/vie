@@ -1,3 +1,4 @@
+import Lean
 import ViE.Basic
 import ViE.State
 import ViE.Terminal
@@ -9,13 +10,15 @@ import ViE.Checkpoint
 import ViE.Loader
 
 namespace ViE
-open ViE.PieceTable
+
 
 /-- Main event loop. -/
 partial def loop (config : Config) (state : EditorState) : IO Unit := do
   -- Only render if state is dirty
-  if state.dirty then
+  let state ← if state.dirty then
     ViE.UI.render state
+  else
+    pure state
 
   -- Reset dirty flag after render (or if it was already clean, keep it clean)
   let state := { state with dirty := false }
@@ -106,6 +109,7 @@ def start (config : Config) (args : List String) : IO Unit := do
         dirty := false
         table := PieceTable.fromString ""
         missingEol := false
+        cache := { lineMap := Lean.RBMap.empty }
       }
 
   -- Check if initial load had an error

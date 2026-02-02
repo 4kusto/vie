@@ -10,11 +10,6 @@ def parseKey (state : EditorState) (c : Char) (currentTime : Nat) : (EditorState
     -- Check for known sequences
     match pending with
     | "\x1b" =>
-       -- This case is only reached if we pushed a char and pending became exactly "\x1b",
-       -- which is impossible if start condition was "pending.length > 0" (meaning pending was already "\x1b")
-       -- UNLESS previous pending was empty? No, then it goes to else block.
-       -- Wait, if pending was "\x1b" and we pushed nothing? No, we always push c.
-       -- So this case is indeed impossible for Escape+Char.
        ({ state with inputState := { state.inputState with pendingKeys := pending, lastInputTime := currentTime } }, [])
     | "\x1b[" =>
        -- CSI sequence starter, keep waiting

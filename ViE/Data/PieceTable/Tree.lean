@@ -2,7 +2,7 @@ import ViE.Data.PieceTable.Piece
 import ViE.Data.PieceTable.Types
 import ViE.Unicode
 
-namespace ViE.PieceTable
+namespace ViE
 
 namespace PieceTableHelper
 
@@ -81,7 +81,7 @@ private theorem sizeOf_get_lt_internal (cs : Array PieceTree) (s : Stats) (i : N
     List.sizeOf_lt_of_mem (List.get_mem data ⟨i, h⟩)
   -- 3. Prove data < internal cs s using simplification
   have lt_internal : sizeOf data < sizeOf (internal (Array.mk data) s) := by
-    grind only [internal.sizeOf_spec, Array.mk.sizeOf_spec]
+    grind only [= internal.sizeOf_spec, = Array.mk.sizeOf_spec]
   -- 4. Transitivity
   apply Nat.lt_trans lt_list lt_internal
 
@@ -526,4 +526,4 @@ partial def fromPieces (pieces : Array Piece) : PieceTree :=
 
 end PieceTree
 
-end ViE.PieceTable
+end ViE

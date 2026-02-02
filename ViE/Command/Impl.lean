@@ -67,6 +67,12 @@ def cmdWincmd (args : List String) (state : EditorState) : IO EditorState :=
   | ["q"] => return (ViE.Window.closeActiveWindow state)
   | _ => return { state with message := s!"Unknown wincmd: {args}" }
 
+def cmdUndo (_ : List String) (state : EditorState) : IO EditorState :=
+  return ViE.EditorState.undo state
+
+def cmdRedo (_ : List String) (state : EditorState) : IO EditorState :=
+  return ViE.EditorState.redo state
+
 def cmdWinLeft (_ : List String) (state : EditorState) : IO EditorState := return ViE.Window.switchWindow state .left
 def cmdWinDown (_ : List String) (state : EditorState) : IO EditorState := return ViE.Window.switchWindow state .down
 def cmdWinUp (_ : List String) (state : EditorState) : IO EditorState := return ViE.Window.switchWindow state .up
@@ -156,6 +162,9 @@ def defaultCommandMap : CommandMap := [
   ("pwd", cmdPwd),
   ("wg", cmdWg),
   ("ee", cmdExplorer),
+  ("undo", cmdUndo),
+  ("u", cmdUndo),
+  ("redo", cmdRedo),
   ("reload", cmdReload),
   ("refresh", cmdReload)
 ]

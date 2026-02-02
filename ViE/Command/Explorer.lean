@@ -93,14 +93,16 @@ def handleExplorerEnter (state : EditorState) : IO EditorState := do
   | some (_, explorer) =>
     -- Get current cursor row
     let cursor := state.getCursor
+    if cursor.row < 2 then return state -- Header rows
+
     -- Explorer header is 2 lines, so subtract 2
     let selectedIdx := cursor.row - 2
 
-    if selectedIdx < 0 || selectedIdx >= explorer.entries.length then
+    if selectedIdx.val >= explorer.entries.length then
       return state
 
     -- Get selected entry
-    let entry := explorer.entries[selectedIdx]!
+    let entry := explorer.entries[selectedIdx.val]!
 
     if entry.isDirectory then
       -- Navigate to directory

@@ -31,14 +31,20 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 - `j`: Move cursor down
 - `k`: Move cursor up
 - `l`: Move cursor right
+- `w`: Move forward to start of next word
+- `b`: Move backward to start of previous word
+- `e`: Move forward to end of word
 - `i`: Enter Insert Mode
 - `:`; Enter Command Mode
 - `q`: Enter Command Mode (alias)
 - `d`: Delete current line (press twice `dd`)
+- `cw`: Change word
+- `x`: Delete character
 - `v`: Enter Visual Mode
 - `V`: Enter VisualBlock Mode
 - `y`: yank current line
 - `p`: paste yanked line
+- `P`: paste yanked line above
 - `gg`: Move to top of file
 - `G`: Move to bottom of file
 - `|`: Jump to column (preceded by number)
@@ -56,6 +62,9 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 
 ### Visual/VisualBlock Mode
 - `h/j/k/l`: select more
+- `w/b/e`: extend selection by word
+- `d/x`: delete selection
+- `y`: yank selection
 - `Esc`: Return to Normal Mode
 
 ## Commands

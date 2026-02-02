@@ -1,3 +1,4 @@
+import Lean
 import ViE.Types
 import ViE.Basic
 import ViE.Color
@@ -5,7 +6,7 @@ import ViE.Workspace
 import ViE.Data.PieceTable
 
 namespace ViE
-open ViE.PieceTable
+
 
 def defaultStatus := (ViE.Color.toBg <|
   (ViE.Color.fromHex "333333").getD
@@ -42,6 +43,7 @@ def initialBuffer : FileBuffer := {
   dirty := false
   table := PieceTable.fromString ""
   missingEol := false
+  cache := { lineMap := Lean.RBMap.empty }
 }
 
 

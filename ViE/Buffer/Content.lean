@@ -1,18 +1,19 @@
+import Lean
 import ViE.Types
 import ViE.Basic
 import ViE.Data.PieceTable
 
 namespace ViE
 
-open ViE.PieceTable
+
 
 /-- Get a line from FileBuffer (delegates to PieceTable) -/
-def getLineFromBuffer (buffer : FileBuffer) (n : Nat) : Option String :=
-  buffer.table.getLine n
+def getLineFromBuffer (buffer : FileBuffer) (n : Row) : Option String :=
+  buffer.table.getLine n.val
 
 /-- Get line length from FileBuffer (delegates to PieceTable) -/
-def getLineLengthFromBuffer (buffer : FileBuffer) (n : Nat) : Option Nat :=
-  buffer.table.getLineLength n
+def getLineLengthFromBuffer (buffer : FileBuffer) (n : Row) : Option Nat :=
+  buffer.table.getLineLength n.val
 
 namespace Buffer
 
@@ -22,7 +23,7 @@ def fileBufferToTextBuffer (buf : FileBuffer) : TextBuffer :=
   if lineCount > 0 then
     -- Map each line index to its string content
     (List.range lineCount).toArray.map fun i =>
-      match getLineFromBuffer buf i with
+      match getLineFromBuffer buf ⟨i⟩ with
       | some str => stringToLine str
       | none => #[]
   else
@@ -39,6 +40,7 @@ def fileBufferFromTextBuffer (id : Nat) (filename : Option String) (content : Te
     dirty := true -- Assume dirty if created from manual content
     table := table
     missingEol := false -- Default
+    cache := { lineMap := Lean.RBMap.empty }
   }
 
 /-- Update FileBuffer from TextBuffer (compatibility function) -/
@@ -49,21 +51,22 @@ def fileBufferUpdateFromTextBuffer (buf : FileBuffer) (newContent : TextBuffer) 
 end Buffer
 
 /-- Modify a line in FileBuffer using PieceTable operations -/
-def modifyLineInBuffer (buffer : FileBuffer) (row : Nat) (f : String → String) : FileBuffer :=
-  match buffer.table.getLineRange row with
+def modifyLineInBuffer (buffer : FileBuffer) (row : Row) (f : String → String) : FileBuffer :=
+  match buffer.table.getLineRange row.val with
   | some (startOffset, length) =>
-     match buffer.table.getLine row with
+     match buffer.table.getLine row.val with
      | some oldLine =>
         let newLine := f oldLine
         -- Edit: Delete old line content, insert new content.
         -- We preserve the newline character if it exists (getLineRange excludes it).
-        let table' := buffer.table.delete startOffset length
-        let table'' := table'.insert startOffset newLine
+        let table' := buffer.table.delete startOffset length startOffset
+        let table'' := table'.insert startOffset newLine startOffset
         { buffer with
           table := table''
           dirty := true
         }
      | none => buffer -- Should check range first, but safe fallback
   | none => buffer -- Line not found
+
 
 end ViE

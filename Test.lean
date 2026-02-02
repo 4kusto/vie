@@ -1,0 +1,29 @@
+import Test.Undo
+import Test.Buffer
+import Test.Layout
+import Test.Integration
+import Test.Keybinds
+import Test.Mode
+import Test.BugReproduction
+import Test.PieceTable.Basic
+import Test.PieceTable.UndoRedo
+import Test.PieceTable.Appended
+import Test.PieceTable.Stress
+
+def test : IO Unit := do
+  IO.println "Running all tests..."
+  Test.Undo.test
+  Test.Buffer.test
+  Test.Layout.test
+  Test.Integration.test
+  Test.Keybinds.test
+  Test.Mode.test
+  Test.BugReproduction.test
+  Test.PieceTable.Basic.test
+  Test.PieceTable.UndoRedo.test
+  Test.PieceTable.Appended.test
+  Test.PieceTable.Stress.test
+  IO.println "All tests finished."
+
+def main : IO Unit := do
+  test

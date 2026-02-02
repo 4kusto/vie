@@ -3,7 +3,7 @@ import ViE.Basic
 import ViE.Buffer
 
 namespace ViE
-open ViE.PieceTable
+
 
 /-- Save buffer to file with error handling using atomic write. -/
 def saveBuffer (state : EditorState) (filename : String) : IO EditorState := do

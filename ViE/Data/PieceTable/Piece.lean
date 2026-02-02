@@ -1,4 +1,4 @@
-namespace ViE.PieceTable
+namespace ViE
 
 /-- Source of a piece: either the original file (read-only) or the add buffer (append-only) -/
 inductive BufferSource where
@@ -39,4 +39,4 @@ instance : Add Stats where
 /-- B+ Tree Node Capacity (Branching Factor) -/
 def NodeCapacity : Nat := 32
 
-end ViE.PieceTable
+end ViE

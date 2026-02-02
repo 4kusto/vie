@@ -15,24 +15,25 @@ def emptyTextBuffer : TextBuffer :=
   #[#[]]
 
 /-- Helper to safely get a line as String. -/
-def getLine (buffer : TextBuffer) (n : Nat) : Option String :=
-  if h : n < buffer.size then
-    some (lineToString buffer[n])
+def getLine (buffer : TextBuffer) (n : Row) : Option String :=
+  if h : n.val < buffer.size then
+    some (lineToString buffer[n.val])
   else
     none
 
 /-- Helper to update a specific line in the buffer. -/
-def modifyLine (buffer : TextBuffer) (row : Nat) (f : String → String) : TextBuffer :=
-  if h : row < buffer.size then
-    let oldLine := buffer[row]
+def modifyLine (buffer : TextBuffer) (row : Row) (f : String → String) : TextBuffer :=
+  if h : row.val < buffer.size then
+    let oldLine := buffer[row.val]
     let newLine := stringToLine (f (lineToString oldLine))
-    buffer.set! row newLine
+    buffer.set! row.val newLine
   else
     buffer
 
 /-- Set a line directly (String version for compatibility) -/
-def setLine (buffer : TextBuffer) (row : Nat) (content : String) : TextBuffer :=
-  buffer.set! row (stringToLine content)
+def setLine (buffer : TextBuffer) (row : Row) (content : String) : TextBuffer :=
+  buffer.set! row.val (stringToLine content)
+
 
 /-- Take first n elements from Array -/
 def arrayTake {α : Type _} (arr : Array α) (n : Nat) : Array α :=

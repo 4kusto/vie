@@ -20,7 +20,7 @@ def EditorState.exitVisualMode (s : EditorState) : EditorState :=
 def normalizeRange (p1 p2 : Point) : (Point × Point) :=
   if p1.row < p2.row || (p1.row == p2.row && p1.col <= p2.col) then (p1, p2) else (p2, p1)
 
-def EditorState.isInSelection (s : EditorState) (row col : Nat) : Bool :=
+def EditorState.isInSelection (s : EditorState) (row : Row) (col : Col) : Bool :=
   match s.selectionStart with
   | none => false
   | some startPt =>
@@ -30,53 +30,45 @@ def EditorState.isInSelection (s : EditorState) (row col : Nat) : Bool :=
        let maxRow := max startPt.row cursor.row
        let minCol := min startPt.col cursor.col
        let maxCol := max startPt.col cursor.col
-       row >= minRow.val && row <= maxRow.val && col >= minCol.val && col <= maxCol.val
+       row >= minRow && row <= maxRow && col >= minCol && col <= maxCol
     else if s.mode == .visual then
        let (p1, p2) := normalizeRange startPt s.getCursor
-       if row < p1.row.val || row > p2.row.val then false
-       else if row > p1.row.val && row < p2.row.val then true
-       else if p1.row.val == p2.row.val then col >= p1.col.val && col <= p2.col.val
-       else if row == p1.row.val then col >= p1.col.val
-       else if row == p2.row.val then col <= p2.col.val
+       if row < p1.row || row > p2.row then false
+       else if row > p1.row && row < p2.row then true
+       else if p1.row == p2.row then col >= p1.col && col <= p2.col
+       else if row == p1.row then col >= p1.col
+       else if row == p2.row then col <= p2.col
        else false
     else
        false
 
-def EditorState.getSelectedText (s : EditorState) : TextBuffer :=
+def EditorState.getSelectedText (s : EditorState) : String :=
   match s.selectionStart with
-  | none => #[]
+  | none => ""
   | some startPt =>
+    let buffer := s.getActiveBuffer
     if s.mode == .visualBlock then
       let cursor := s.getCursor
-      let minRow := min startPt.row cursor.row
-      let maxRow := max startPt.row cursor.row
-      let minCol := min startPt.col cursor.col
-      let maxCol := max startPt.col cursor.col
-      let content := s.activeBufferContent
-      (List.range (maxRow.val - minRow.val + 1)).toArray.map fun i =>
-        let row := minRow.val + i
-        let line := getLine content row |>.getD ""
-        let chars := line.toList
-        stringToLine (String.ofList (chars.drop minCol.val |>.take (maxCol.val - minCol.val + 1)))
+      let minRow := (min startPt.row cursor.row).val
+      let maxRow := (max startPt.row cursor.row).val
+      let minCol := (min startPt.col cursor.col).val
+      let maxCol := (max startPt.col cursor.col).val
+
+      let lines := (List.range (maxRow - minRow + 1)).map fun i =>
+        let r := minRow + i
+        let line := ViE.getLineFromBuffer buffer ⟨r⟩ |>.getD ""
+        let sub := line.toRawSubstring.drop minCol |>.take (maxCol - minCol + 1)
+        sub.toString
+      String.intercalate "\n" lines
     else
       let (p1, p2) := normalizeRange startPt s.getCursor
-      let content := s.activeBufferContent
-      if p1.row == p2.row then
-        let line := getLine content p1.row.val |>.getD ""
-        let chars := line.toList
-        #[stringToLine (String.ofList (chars.drop p1.col.val |>.take (p2.col.val - p1.col.val + 1)))]
-      else
-        let firstLine := getLine content p1.row.val |>.getD ""
-        let lastLine := getLine content p2.row.val |>.getD ""
-        let midLines := arrayDrop (arrayTake content p2.row.val) (p1.row.val + 1)
-        let firstPart := stringToLine (String.ofList (firstLine.toList.drop p1.col.val))
-        let lastPart := stringToLine (String.ofList (lastLine.toList.take (p2.col.val + 1)))
-        arrayConcat [#[firstPart], midLines, #[lastPart]]
-
+      let startOff := buffer.table.getOffsetFromPoint p1.row.val p1.col.val |>.getD 0
+      let endOff := buffer.table.getOffsetFromPoint p2.row.val (p2.col.val + 1) |>.getD buffer.table.tree.length
+      PieceTree.getSubstring buffer.table.tree startOff (endOff - startOff) buffer.table
 
 def EditorState.yankSelection (s : EditorState) : EditorState :=
   let text := s.getSelectedText
-  { s.exitVisualMode with clipboard := some text, message := s!"Yanked {text.size} lines" }
+  { s.exitVisualMode with clipboard := some text, message := s!"Yanked selection" }
 
 def EditorState.deleteSelection (s : EditorState) : EditorState :=
   match s.selectionStart with
@@ -84,40 +76,29 @@ def EditorState.deleteSelection (s : EditorState) : EditorState :=
   | some startPt =>
     if s.mode == .visualBlock then
       let cursor := s.getCursor
-      let minRow := min startPt.row cursor.row
-      let maxRow := max startPt.row cursor.row
-      let minCol := min startPt.col cursor.col
-      let maxCol := max startPt.col cursor.col
-      let s' := s.updateActiveBufferContent fun buffer =>
-         buffer.mapIdx fun i lineArr =>
-           let line := lineToString lineArr
-           if i >= minRow.val && i <= maxRow.val then
-             let chars := line.toList
-             if minCol.val < chars.length then
-               let before := chars.take minCol.val
-               let after := chars.drop (maxCol.val + 1)
-               stringToLine (String.ofList (before ++ after))
-             else
-               lineArr
-           else
-             lineArr
-      (s'.setCursor (Point.make minRow.val minCol.val)).exitVisualMode
+      let minRow := (min startPt.row cursor.row).val
+      let maxRow := (max startPt.row cursor.row).val
+      let minCol := (min startPt.col cursor.col).val
+      let maxCol := (max startPt.col cursor.col).val
+
+      let s' := (List.range (maxRow - minRow + 1)).foldl (init := s) fun st i =>
+        let r := minRow + i
+        st.updateActiveBuffer fun buffer =>
+          match buffer.table.getLineRange r with
+          | some (lineStart, lineLen) =>
+            let start := lineStart + minCol
+            let len := min (maxCol - minCol + 1) (if lineLen > minCol then lineLen - minCol else 0)
+            if len > 0 then
+              { buffer with table := buffer.table.delete start len start, dirty := true }
+            else buffer
+          | none => buffer
+      s'.exitVisualMode |>.setCursor { row := ⟨minRow⟩, col := ⟨minCol⟩ }
     else
       let (p1, p2) := normalizeRange startPt s.getCursor
-      let s' := s.updateActiveBufferContent fun buffer =>
-        if p1.row == p2.row then
-          modifyLine buffer p1.row.val fun line =>
-            let chars := line.toList
-            let before := chars.take p1.col.val
-            let after := chars.drop (p2.col.val + 1)
-            String.ofList (before ++ after)
-        else
-          let beforeLines := arrayTake buffer p1.row.val
-          let afterLines := arrayDrop buffer (p2.row.val + 1)
-          let firstLine := getLine buffer p1.row.val |>.getD ""
-          let lastLine := getLine buffer p2.row.val |>.getD ""
-          let newJoinedLine := stringToLine (String.ofList (firstLine.toList.take p1.col.val ++ lastLine.toList.drop (p2.col.val + 1)))
-          arrayConcat [beforeLines, #[newJoinedLine], afterLines]
-      (s'.setCursor p1).exitVisualMode
+      let s' := s.updateActiveBuffer fun buffer =>
+        let startOff := buffer.table.getOffsetFromPoint p1.row.val p1.col.val |>.getD 0
+        let endOff := buffer.table.getOffsetFromPoint p2.row.val (p2.col.val + 1) |>.getD buffer.table.tree.length
+        { buffer with table := buffer.table.delete startOff (endOff - startOff) startOff, dirty := true }
+      s'.exitVisualMode |>.setCursor p1
 
 end ViE
