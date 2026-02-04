@@ -6,6 +6,10 @@ import Test.Keybinds
 import Test.Mode
 import Test.CursorReproduction
 import Test.PasteReproduction
+import Test.Workspace
+import Test.PreviewData
+import Test.WorkgroupExplorer
+import Test.ExplorerPreview
 import Test.PieceTable.Basic
 import Test.PieceTable.UndoRedo
 import Test.PieceTable.Appended
@@ -21,6 +25,10 @@ def test : IO Unit := do
   Test.Mode.test
   Test.CursorReproduction.test
   Test.PasteReproduction.test
+  Test.Workspace.test
+  Test.PreviewData.test
+  Test.WorkgroupExplorer.test
+  Test.ExplorerPreview.test
   Test.PieceTable.Basic.test
   Test.PieceTable.UndoRedo.test
   Test.PieceTable.Appended.test

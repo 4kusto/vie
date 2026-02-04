@@ -157,6 +157,14 @@ def testCounted : IO Unit := do
   let s_2j ← runKeys s_lines [Key.char '2', Key.char 'j']
   assertCursor "2j moves 2 lines down" s_2j 2 0
 
+def testWorkgroupSwitch : IO Unit := do
+  IO.println "  Testing Workgroup Switching..."
+  let s0 := ViE.initialState
+  let s1 ← runKeys s0 [Key.alt '3']
+  assertEqual "Alt-3 switches workgroup" 3 s1.currentGroup
+  let s2 ← runKeys s1 [Key.alt '0']
+  assertEqual "Alt-0 switches workgroup" 0 s2.currentGroup
+
 def test : IO Unit := do
   IO.println "Starting Expanded Keybind Tests..."
   testMotions
@@ -164,6 +172,7 @@ def test : IO Unit := do
   testOperators
   testVisual
   testCounted
+  testWorkgroupSwitch
   IO.println "All Expanded Keybind Tests passed!"
 
 end Test.Keybinds

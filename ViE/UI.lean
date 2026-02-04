@@ -12,17 +12,8 @@ def leftPad (s : String) (width : Nat) : String :=
   else "".pushn ' ' (width - s.length) ++ s
 
 /-- Take characters from substring until visual width limit is reached. -/
-partial def takeVisual (s : Substring.Raw) (width : Nat) : String :=
-  let rec loop (sub : Substring.Raw) (currW : Nat) (acc : String) : String :=
-    if sub.isEmpty then acc
-    else
-      let c := sub.front
-      let w := Unicode.charWidth c
-      if currW + w <= width then
-        loop (sub.drop 1) (currW + w) (acc ++ Unicode.getDisplayString c)
-      else
-        acc
-  loop s 0 ""
+def takeVisual (s : Substring.Raw) (width : Nat) : String :=
+  Unicode.takeByDisplayWidth s width
 
 /-- Render the current editor state to the terminal. -/
 def render (state : EditorState) : IO EditorState := do
@@ -35,10 +26,10 @@ def render (state : EditorState) : IO EditorState := do
 
   let (rows, cols) ← Terminal.getWindowSize
 
-  let wg := state.getCurrentWorkgroup
+  let ws := state.getCurrentWorkspace
   let getBuffer (st : EditorState) (id : Nat) : FileBuffer :=
-    let wg := st.getCurrentWorkgroup
-    wg.buffers.find? (fun b => b.id == id) |>.getD initialFileBuffer
+    let ws := st.getCurrentWorkspace
+    ws.buffers.find? (fun b => b.id == id) |>.getD initialFileBuffer
 
   let rec renderLayout (l : Layout) (st : EditorState) (r c h w : Nat) : (Array String × EditorState) := Id.run do
     match l with
@@ -57,19 +48,53 @@ def render (state : EditorState) : IO EditorState := do
 
         if lineIdx.val < FileBuffer.lineCount buf then
            -- Check cache
+           let lnWidth := if st.config.showLineNumbers then 4 else 0
+           let availableWidth := if w > lnWidth then w - lnWidth else 0
+
            let cachedLine := buf.cache.find lineIdx
+           let cachedRaw := buf.cache.findRaw lineIdx
+           let cachedIdx := buf.cache.findIndex lineIdx
            let (displayLine, nextSt) := match cachedLine with
-             | some s => (s, currentSt)
+             | some (s, cachedScrollCol, cachedWidth) =>
+               if cachedScrollCol == view.scrollCol.val && cachedWidth == availableWidth then
+                 (s, currentSt)
+               else
+                 -- Cache miss; fall through to recompute.
+                 match getLineFromBuffer buf lineIdx with
+                 | some lineStr =>
+                   let sub := ViE.Unicode.dropByDisplayWidth lineStr.toRawSubstring view.scrollCol.val
+                   let dl := takeVisual sub availableWidth
+                   let cache := match cachedRaw, cachedIdx with
+                     | some raw, some idx =>
+                       if raw == lineStr then
+                         buf.cache
+                       else
+                         (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
+                     | _, _ =>
+                       (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
+                   let cache := (cache.update lineIdx dl view.scrollCol.val availableWidth).updateRaw lineIdx lineStr
+                   let updatedBuf := { buf with cache := cache }
+                   let s' := currentSt.updateCurrentWorkspace fun ws =>
+                     { ws with buffers := ws.buffers.map (fun (b : FileBuffer) => if b.id == buf.id then updatedBuf else b) }
+                   (dl, s')
+                 | none => ("", currentSt)
              | none =>
                if let some lineStr := getLineFromBuffer buf lineIdx then
-                 let lnWidth := if st.config.showLineNumbers then 4 else 0
-                 let availableWidth := if w > lnWidth then w - lnWidth else 0
-                 let sub := lineStr.toRawSubstring.drop view.scrollCol.val
+                 let sub := ViE.Unicode.dropByDisplayWidth lineStr.toRawSubstring view.scrollCol.val
                  let dl := takeVisual sub availableWidth
+                 let cache := match cachedRaw, cachedIdx with
+                   | some raw, some idx =>
+                     if raw == lineStr then
+                       buf.cache
+                     else
+                       (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
+                   | _, _ =>
+                     (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
                  -- Update cache in currentSt
-                 let updatedBuf := { buf with cache := buf.cache.update lineIdx dl }
-                 let s' := currentSt.updateCurrentWorkgroup fun wg =>
-                   { wg with buffers := wg.buffers.map (fun (b : FileBuffer) => if b.id == buf.id then updatedBuf else b) }
+                 let cache := (cache.update lineIdx dl view.scrollCol.val availableWidth).updateRaw lineIdx lineStr
+                 let updatedBuf := { buf with cache := cache }
+                 let s' := currentSt.updateCurrentWorkspace fun ws =>
+                   { ws with buffers := ws.buffers.map (fun (b : FileBuffer) => if b.id == buf.id then updatedBuf else b) }
                  (dl, s')
                else ("", currentSt)
 
@@ -85,10 +110,13 @@ def render (state : EditorState) : IO EditorState := do
            | some _ =>
              let mut styleActive := false
              let chars := displayLine.toList
-             let mut idx := 0
+             let mut dispIdx := 0
              for ch in chars do
-                let colVal := view.scrollCol.val + idx
-                let isSelected := st.isInSelection lineIdx ⟨colVal⟩
+                let w := Unicode.charWidth ch
+                let colVal := view.scrollCol.val + dispIdx
+                let isSelected :=
+                  st.isInSelection lineIdx ⟨colVal⟩ ||
+                  (w > 1 && st.isInSelection lineIdx ⟨colVal + 1⟩)
 
                 if isSelected && !styleActive then
                   winBuf := winBuf.push "\x1b[7m" -- Inverse video
@@ -98,7 +126,7 @@ def render (state : EditorState) : IO EditorState := do
                   styleActive := false
 
                 winBuf := winBuf.push ch.toString
-                idx := idx + 1
+                dispIdx := dispIdx + w
 
              if styleActive then winBuf := winBuf.push "\x1b[0m"
         else
@@ -110,9 +138,9 @@ def render (state : EditorState) : IO EditorState := do
       let statusRow := r + workH
       winBuf := winBuf.push (Terminal.moveCursorStr statusRow c)
       let fileName := buf.filename.getD "[No Name]"
-      let modeStr := if id == currentSt.getCurrentWorkgroup.activeWindowId then s!"-- {st.mode} --" else "--"
+      let modeStr := if id == currentSt.getCurrentWorkspace.activeWindowId then s!"-- {st.mode} --" else "--"
       let eolMark := if buf.missingEol then " [noeol]" else ""
-      let statusStr := s!"{modeStr} {fileName}{eolMark} [W:{id} B:{view.bufferId}] [{wg.name}] {st.workspace.name}"
+      let statusStr := s!"{modeStr} {fileName}{eolMark} [W:{id} B:{view.bufferId}] [{st.getCurrentWorkgroup.name}] {st.getCurrentWorkspace.name}"
       winBuf := winBuf.push st.config.statusBarStyle
       winBuf := winBuf.push statusStr.trimAscii.toString
       winBuf := winBuf.push Terminal.clearLineStr
@@ -153,7 +181,7 @@ def render (state : EditorState) : IO EditorState := do
       (topStr ++ sepStr ++ bottomStr, st'')
 
   let layoutH := rows - 1
-  let (layoutStr, state) := renderLayout wg.layout state 0 0 layoutH cols
+  let (layoutStr, state) := renderLayout ws.layout state 0 0 layoutH cols
   buffer := buffer ++ layoutStr
 
   -- Global Status / Command Line
@@ -168,22 +196,21 @@ def render (state : EditorState) : IO EditorState := do
   let rec getCursorPos (l : Layout) (r c h w : Nat) : Option (Nat × Nat) :=
     match l with
     | Layout.window id view =>
-      if id == wg.activeWindowId then
-         let buf := getBuffer state view.bufferId
+      if id == ws.activeWindowId then
+--         let buf := getBuffer state view.bufferId
          let workH := if h > 0 then h - 1 else 0
          let colOffset := if state.config.showLineNumbers then 4 else 0
          let visualRow := view.cursor.row.val - view.scrollRow.val
 
          if visualRow >= 0 && visualRow < workH then
-             let rIdx : Row := ⟨view.scrollRow.val + visualRow⟩
-             if let some currentLineStr := getLineFromBuffer buf rIdx then
-               let preCursor := (currentLineStr.toRawSubstring.drop view.scrollCol.val).take (view.cursor.col.val - view.scrollCol.val)
-               let visualCol := ViE.Unicode.substringWidth preCursor
-
+--             let rIdx : Row := ⟨view.scrollRow.val + visualRow⟩
+             if view.cursor.col.val < view.scrollCol.val then
+               none
+             else
+               let visualCol := view.cursor.col.val - view.scrollCol.val
                if (visualCol + colOffset) < w then
                   some (r + visualRow, c + visualCol + colOffset)
                else none
-             else none
          else none
       else none
     | Layout.hsplit left right ratio =>
@@ -194,7 +221,7 @@ def render (state : EditorState) : IO EditorState := do
       (getCursorPos top r c topH w).orElse (fun _ => getCursorPos bottom (r + topH + 1) c (if h > topH then h - topH - 1 else 0) w)
 
   buffer := buffer.push (
-    match getCursorPos wg.layout 0 0 layoutH cols with
+    match getCursorPos ws.layout 0 0 layoutH cols with
     | some (pr, pc) => Terminal.moveCursorStr pr pc
     | none => "" -- Cursor hidden or out of view
   )

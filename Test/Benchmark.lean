@@ -16,8 +16,8 @@ def makeBenchConfig : Config := {
   bindings := ViE.Key.makeKeyMap ViE.Command.defaultCommandMap
 }
 
-/-- Simulate a heavy editing session -/
-def runBenchmark (iterations : Nat) : IO Unit := do
+/-- Simulate a heavy editing session. -/
+def runBenchmark (iterations : Nat) (render : Bool := true) : IO Unit := do
   let _config := makeBenchConfig
   let mut s := ViE.initialState
 
@@ -69,8 +69,8 @@ def runBenchmark (iterations : Nat) : IO Unit := do
     s := s.undo
 
   -- 7. Render Simulation (Crucial for B+ tree traversal check)
-  -- We don't actually print to TTY to avoid I/O bottlenecks in perf
-  let _ ← ViE.UI.render s
+  if render then
+    let _ ← ViE.UI.render s
 
   IO.println "Benchmark completed."
 
@@ -78,4 +78,7 @@ end ViE.Benchmark
 
 def main (args : List String) : IO Unit := do
   let iter := args[0]? |>.bind String.toNat? |>.getD 1000
-  ViE.Benchmark.runBenchmark iter
+  let noRender := args.any (fun a => a == "--no-render")
+  let render := !noRender
+  -- Run benchmark; rendering can be disabled with --no-render.
+  ViE.Benchmark.runBenchmark iter render

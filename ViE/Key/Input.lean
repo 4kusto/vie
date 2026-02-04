@@ -22,6 +22,14 @@ def parseKey (state : EditorState) (c : Char) (currentTime : Nat) : (EditorState
     | "\x1b[H" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.unknown 'H']) -- Home?
     | "\x1b[F" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.unknown 'F']) -- End?
     | _ =>
+       -- Treat ESC + <char> as Alt combination when it's a single character and not CSI.
+       match pending.toList with
+       | ['\x1b', ch] =>
+         if ch != '[' then
+           ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.alt ch])
+         else
+           ({ state with inputState := { state.inputState with pendingKeys := pending, lastInputTime := currentTime } }, [])
+       | _ =>
        -- Unknown sequence or incomplete?
        -- If length is long enough (e.g. 3 chars) and no match, flush as individual keys?
        -- Or check if it starts with valid prefix.

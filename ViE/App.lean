@@ -12,6 +12,26 @@ import ViE.Loader
 namespace ViE
 
 
+/-- Resolve startup arguments into workspace path and filename. -/
+def resolveStartupTarget (filename : Option String) : IO (Option String × Option String) := do
+  match filename with
+  | some path =>
+    let filePath := System.FilePath.mk path
+    if ← filePath.pathExists then
+      if ← filePath.isDir then
+        -- It's a directory, use as workspace
+        pure (some path, none)
+      else
+        -- It's a file, use its parent directory as workspace
+        let parentDir := match filePath.parent with
+          | some p => p.toString
+          | none => "."
+        pure (some parentDir, some path)
+    else
+      -- Path doesn't exist, treat as new file
+      pure (none, some path)
+  | none => pure (none, none)
+
 /-- Main event loop. -/
 partial def loop (config : Config) (state : EditorState) : IO Unit := do
   -- Only render if state is dirty
@@ -28,7 +48,8 @@ partial def loop (config : Config) (state : EditorState) : IO Unit := do
 
   -- Update window size
   let (rows, cols) ← ViE.Terminal.getWindowSize
-  let state := { state with windowHeight := rows, windowWidth := cols }
+  let resized := rows != state.windowHeight || cols != state.windowWidth
+  let state := { state with windowHeight := rows, windowWidth := cols, dirty := state.dirty || resized }
 
   -- Handle the case where readKey returns None (no input available)
   match c with
@@ -85,20 +106,7 @@ def start (config : Config) (args : List String) : IO Unit := do
   let filename := startArgs.head?
 
   -- Check if the argument is a directory
-  let (workspacePath, actualFilename) ← match filename with
-    | some path =>
-      let filePath := System.FilePath.mk path
-      if ← filePath.pathExists then
-        if ← filePath.isDir then
-          -- It's a directory, use as workspace
-          pure (some path, none)
-        else
-          -- It's a file
-          pure (none, some path)
-      else
-        -- Path doesn't exist, treat as new file
-        pure (none, some path)
-    | none => pure (none, none)
+  let (workspacePath, actualFilename) ← resolveStartupTarget filename
 
   -- Load buffer if file exists
   let initialBuffer ← match actualFilename with
@@ -109,20 +117,15 @@ def start (config : Config) (args : List String) : IO Unit := do
         dirty := false
         table := PieceTable.fromString ""
         missingEol := false
-        cache := { lineMap := Lean.RBMap.empty }
+        cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
       }
 
   -- Check if initial load had an error
   let firstLine := getLineFromBuffer initialBuffer 0 |>.getD ""
   let hasError := firstLine.startsWith "Error loading file:"
 
-  let workspace := match workspacePath with
-    | some path => { rootPath := some path }
-    | none => ViE.defaultWorkspace
-
   let state := { ViE.initialState with
     config := config.settings,
-    workspace := workspace,
     message := if hasError then firstLine
                else match actualFilename with
                  | some f => s!"\"{f}\" [Read]"
@@ -131,9 +134,17 @@ def start (config : Config) (args : List String) : IO Unit := do
                    | none => "New File"
   }
 
-  -- Update the first workgroup with the initial buffer
-  let state := state.updateCurrentWorkgroup fun wg =>
-    { wg with buffers := [initialBuffer] }
+  -- Update the first workspace with the initial buffer and root path
+  let state := state.updateCurrentWorkspace fun ws =>
+    let wsName := match workspacePath with
+      | some path => (System.FilePath.fileName path).getD ws.name
+      | none => ws.name
+    { ws with
+        name := wsName,
+        rootPath := workspacePath,
+        buffers := [initialBuffer],
+        nextBufferId := 1
+    }
 
   ViE.Terminal.enableRawMode
   try

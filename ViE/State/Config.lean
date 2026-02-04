@@ -2,7 +2,6 @@ import Lean
 import ViE.Types
 import ViE.Basic
 import ViE.Color
-import ViE.Workspace
 import ViE.Data.PieceTable
 
 namespace ViE
@@ -12,10 +11,7 @@ def defaultStatus := (ViE.Color.toBg <|
   (ViE.Color.fromHex "333333").getD
    .brightBlack) ++ (ViE.Color.toFg .white)
 
-def defaultWorkspace : Workspace := {
-  rootPath := none
-  name := "ViE"
-}
+def defaultWorkspaceName : String := "ViE"
 
 def defaultConfig : EditorConfig := {
   showLineNumbers := false
@@ -43,7 +39,7 @@ def initialBuffer : FileBuffer := {
   dirty := false
   table := PieceTable.fromString ""
   missingEol := false
-  cache := { lineMap := Lean.RBMap.empty }
+  cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
 }
 
 
@@ -54,28 +50,39 @@ def initialView : ViewState := {
   scrollCol := Col.zero
 }
 
-def initialWorkgroupState : WorkgroupState := {
-  name := "1"
-  buffers := [initialBuffer]
-  nextBufferId := 1
-  layout := .window 0 initialView
+def makeWorkspaceState (name : String) (rootPath : Option String) (nextBufId : Nat) : WorkspaceState := {
+  name := name
+  rootPath := rootPath
+  buffers := [{ initialBuffer with id := nextBufId }]
+  nextBufferId := nextBufId + 1
+  layout := .window 0 { initialView with bufferId := nextBufId }
   activeWindowId := 0
   nextWindowId := 1
+}
+
+def initialWorkgroupState : WorkgroupState := {
+  name := "1"
+  workspaces := #[makeWorkspaceState defaultWorkspaceName none 0]
+  currentWorkspace := 0
 }
 
 def createEmptyWorkgroup (name : String) (nextBufId : Nat) : WorkgroupState := {
   name := name
-  buffers := [{ initialBuffer with id := nextBufId }]
-  nextBufferId := nextBufId + 1
-  layout := .window 0 initialView
-  activeWindowId := 0
-  nextWindowId := 1
+  workspaces := #[makeWorkspaceState defaultWorkspaceName none nextBufId]
+  currentWorkspace := 0
 }
 
 
 /-- Helper to create an array of initial workgroup states -/
-def makeInitialWorkgroups : Array WorkgroupState :=
-  #[initialWorkgroupState]
+def makeInitialWorkgroups : Array WorkgroupState := Id.run do
+  let mut groups : Array WorkgroupState := #[]
+  let mut nextBufId := 0
+  for i in [0:10] do
+    let name := s!"{i}"
+    let wg := createEmptyWorkgroup name nextBufId
+    groups := groups.push wg
+    nextBufId := nextBufId + 1
+  groups
 
 
 def initialState : EditorState := {
@@ -86,7 +93,6 @@ def initialState : EditorState := {
   message := "Welcome to Lean Editor"
   shouldQuit := false
   config := defaultConfig
-  workspace := defaultWorkspace
   clipboard := none
   selectionStart := none
   explorers := []

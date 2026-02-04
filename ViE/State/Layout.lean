@@ -12,6 +12,21 @@ def EditorState.getCurrentWorkgroup (s : EditorState) : WorkgroupState :=
 def EditorState.updateCurrentWorkgroup (s : EditorState) (f : WorkgroupState → WorkgroupState) : EditorState :=
   { s with workgroups := s.workgroups.set! s.currentGroup (f (s.getCurrentWorkgroup)) }
 
+/-- Get current workspace within the active workgroup -/
+def EditorState.getCurrentWorkspace (s : EditorState) : WorkspaceState :=
+  let wg := s.getCurrentWorkgroup
+  wg.workspaces[wg.currentWorkspace]!
+
+/-- Update current workspace within the active workgroup -/
+def EditorState.updateCurrentWorkspace (s : EditorState) (f : WorkspaceState → WorkspaceState) : EditorState :=
+  s.updateCurrentWorkgroup fun wg =>
+    if h : wg.currentWorkspace < wg.workspaces.size then
+      let ws := wg.workspaces[wg.currentWorkspace]!
+      let updated := f ws
+      { wg with workspaces := wg.workspaces.set! wg.currentWorkspace updated }
+    else
+      wg
+
 /-- Switch to workgroup n -/
 def EditorState.switchToWorkgroup (s : EditorState) (n : Nat) : EditorState :=
   if n < s.workgroups.size then
@@ -70,38 +85,38 @@ def Layout.remove (l : Layout) (id : Nat) : Option Layout :=
 
 
 def EditorState.getActiveBuffer (s : EditorState) : FileBuffer :=
-  let wg := s.getCurrentWorkgroup
-  match wg.layout.findView wg.activeWindowId with
-  | some v => wg.buffers.find? (fun b => b.id == v.bufferId) |>.getD initialBuffer
+  let ws := s.getCurrentWorkspace
+  match ws.layout.findView ws.activeWindowId with
+  | some v => ws.buffers.find? (fun b => b.id == v.bufferId) |>.getD initialBuffer
   | none => initialBuffer
 
 
 def EditorState.updateActiveBuffer (s : EditorState) (f : FileBuffer -> FileBuffer) : EditorState :=
-  s.updateCurrentWorkgroup fun wg =>
-    let view := wg.layout.findView wg.activeWindowId
+  s.updateCurrentWorkspace fun ws =>
+    let view := ws.layout.findView ws.activeWindowId
     match view with
     | some v =>
-      let newBuffers := wg.buffers.map fun b => if b.id == v.bufferId then FileBuffer.clearCache (f b) else b
-      { wg with buffers := newBuffers }
-    | none => wg
+      let newBuffers := ws.buffers.map fun b => if b.id == v.bufferId then FileBuffer.clearCache (f b) else b
+      { ws with buffers := newBuffers }
+    | none => ws
 
 
 def EditorState.getScroll (s : EditorState) : Row × Col :=
-  let wg := s.getCurrentWorkgroup
-  match wg.layout.findView wg.activeWindowId with
+  let ws := s.getCurrentWorkspace
+  match ws.layout.findView ws.activeWindowId with
   | some v => (v.scrollRow, v.scrollCol)
   | none => (Row.zero, Col.zero)
 
 def EditorState.updateActiveView (s : EditorState) (f : ViewState → ViewState) : EditorState :=
-  s.updateCurrentWorkgroup fun wg =>
-    { wg with layout := wg.layout.updateView wg.activeWindowId f }
+  s.updateCurrentWorkspace fun ws =>
+    { ws with layout := ws.layout.updateView ws.activeWindowId f }
 
 
 def EditorState.getActiveWindowBounds (s : EditorState) : Nat × Nat :=
-  let wg := s.getCurrentWorkgroup
+  let ws := s.getCurrentWorkspace
   let rec findBounds (l : Layout) (h w : Nat) : Option (Nat × Nat) :=
     match l with
-    | .window id _ => if id == wg.activeWindowId then some (h, w) else none
+    | .window id _ => if id == ws.activeWindowId then some (h, w) else none
     | .hsplit left right ratio =>
       let leftW := (Float.ofNat w * ratio).toUInt64.toNat
       (findBounds left h leftW).orElse (fun _ => findBounds right h (if w > leftW then w - leftW - 1 else 0))
@@ -111,7 +126,7 @@ def EditorState.getActiveWindowBounds (s : EditorState) : Nat × Nat :=
 
   -- Reserve 1 line for global status/command
   let layoutH := if s.windowHeight > 0 then s.windowHeight - 1 else 0
-  (findBounds wg.layout layoutH s.windowWidth).getD (layoutH, s.windowWidth)
+  (findBounds ws.layout layoutH s.windowWidth).getD (layoutH, s.windowWidth)
 
 
 def getAllWindowBounds (l : Layout) (h w : Nat) : List (Nat × Nat × Nat × Nat × Nat) :=

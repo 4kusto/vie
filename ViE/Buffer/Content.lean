@@ -2,6 +2,7 @@ import Lean
 import ViE.Types
 import ViE.Basic
 import ViE.Data.PieceTable
+import ViE.Unicode
 
 namespace ViE
 
@@ -9,11 +10,27 @@ namespace ViE
 
 /-- Get a line from FileBuffer (delegates to PieceTable) -/
 def getLineFromBuffer (buffer : FileBuffer) (n : Row) : Option String :=
-  buffer.table.getLine n.val
+  match buffer.cache.findRaw n with
+  | some s => some s
+  | none => buffer.table.getLine n.val
+
+/-- Get byte offset from Row/Col (display column) using per-line index cache if available. -/
+def getOffsetFromPointInBuffer (buffer : FileBuffer) (row col : Nat) : Option Nat :=
+  match buffer.table.getLineRange row with
+  | some (startOff, len) =>
+      let line := getLineFromBuffer buffer ⟨row⟩ |>.getD ""
+      let byteOff := match buffer.cache.findIndex ⟨row⟩ with
+        | some idx => ViE.Unicode.displayColToByteOffsetFromIndex idx col
+        | none => ViE.Unicode.displayColToByteOffset line col
+      let clamped := if byteOff <= len then byteOff else len
+      some (startOff + clamped)
+  | none => none
 
 /-- Get line length from FileBuffer (delegates to PieceTable) -/
 def getLineLengthFromBuffer (buffer : FileBuffer) (n : Row) : Option Nat :=
-  buffer.table.getLineLength n.val
+  match getLineFromBuffer buffer n with
+  | some line => some (ViE.Unicode.stringWidth line)
+  | none => none
 
 namespace Buffer
 
@@ -40,7 +57,7 @@ def fileBufferFromTextBuffer (id : Nat) (filename : Option String) (content : Te
     dirty := true -- Assume dirty if created from manual content
     table := table
     missingEol := false -- Default
-    cache := { lineMap := Lean.RBMap.empty }
+    cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
   }
 
 /-- Update FileBuffer from TextBuffer (compatibility function) -/
@@ -54,7 +71,7 @@ end Buffer
 def modifyLineInBuffer (buffer : FileBuffer) (row : Row) (f : String → String) : FileBuffer :=
   match buffer.table.getLineRange row.val with
   | some (startOffset, length) =>
-     match buffer.table.getLine row.val with
+     match getLineFromBuffer buffer row with
      | some oldLine =>
         let newLine := f oldLine
         -- Edit: Delete old line content, insert new content.

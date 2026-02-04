@@ -1,0 +1,132 @@
+import Std
+
+namespace Sample
+
+def fib : Nat → Nat
+  | 0 => 0
+  | 1 => 1
+  | n + 2 => fib (n + 1) + fib n
+
+def isEven : Nat → Bool
+  | 0 => true
+  | 1 => false
+  | n + 2 => isEven n
+
+def main : IO Unit := do
+  let values := (List.range 20).map fib
+  IO.println s!"fib(0..19) = {values}"
+  IO.println s!"isEven 42 = {isEven 42}"
+
+end Sample
+
+
+import Std
+
+namespace Sample
+
+def fib : Nat → Nat
+  | 0 => 0
+  | 1 => 1
+  | n + 2 => fib (n + 1) + fib n
+
+def isEven : Nat → Bool
+  | 0 => true
+  | 1 => false
+  | n + 2 => isEven n
+
+def main : IO Unit := do
+  let values := (List.range 20).map fib
+  IO.println s!"fib(0..19) = {values}"
+  IO.println s!"isEven 42 = {isEven 42}"
+
+end Sample
+
+
+import Std
+
+namespace Sample
+
+def fib : Nat → Nat
+  | 0 => 0
+  | 1 => 1
+  | n + 2 => fib (n + 1) + fib n
+
+def isEven : Nat → Bool
+  | 0 => true
+  | 1 => false
+  | n + 2 => isEven n
+
+def main : IO Unit := do
+  let values := (List.range 20).map fib
+  IO.println s!"fib(0..19) = {values}"
+  IO.println s!"isEven 42 = {isEven 42}"
+
+end Sample
+
+
+import Std
+
+namespace Sample
+
+def fib : Nat → Nat
+  | 0 => 0
+  | 1 => 1
+  | n + 2 => fib (n + 1) + fib n
+
+def isEven : Nat → Bool
+  | 0 => true
+  | 1 => false
+  | n + 2 => isEven n
+
+def main : IO Unit := do
+  let values := (List.range 20).map fib
+  IO.println s!"fib(0..19) = {values}"
+  IO.println s!"isEven 42 = {isEven 42}"
+
+end Sample
+
+
+import Std
+
+namespace Sample
+
+def fib : Nat → Nat
+  | 0 => 0
+  | 1 => 1
+  | n + 2 => fib (n + 1) + fib n
+
+def isEven : Nat → Bool
+  | 0 => true
+  | 1 => false
+  | n + 2 => isEven n
+
+def main : IO Unit := do
+  let values := (List.range 20).map fib
+  IO.println s!"fib(0..19) = {values}"
+  IO.println s!"isEven 42 = {isEven 42}"
+
+end Sample
+
+
+import Std
+
+namespace Sample
+
+def fib : Nat → Nat
+  | 0 => 0
+  | 1 => 1
+  | n + 2 => fib (n + 1) + fib n
+
+def isEven : Nat → Bool
+  | 0 => true
+  | 1 => false
+  | n + 2 => isEven n
+
+def main : IO Unit := do
+  let values := (List.range 20).map fib
+  IO.println s!"fib(0..19) = {values}"
+  IO.println s!"isEven 42 = {isEven 42}"
+
+end Sample
+
+

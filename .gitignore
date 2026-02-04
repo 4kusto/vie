@@ -1,5 +1,8 @@
 .pijul
 .DS_Store
 .lake
-
+perf/
+perf.data*
+perf-*.log
+flamegraph*.svg
 

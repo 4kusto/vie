@@ -56,8 +56,12 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
       else
 
         handleMotion s EditorState.moveCursorLeft
-  | Key.char 'j' => handleMotion s EditorState.moveCursorDown
-  | Key.char 'k' => handleMotion s EditorState.moveCursorUp
+  | Key.char 'j' => do
+      let s' ← handleMotion s EditorState.moveCursorDown
+      ViE.Feature.refreshExplorerPreview s'
+  | Key.char 'k' => do
+      let s' ← handleMotion s EditorState.moveCursorUp
+      ViE.Feature.refreshExplorerPreview s'
   | Key.char 'l' => handleMotion s EditorState.moveCursorRight
   | Key.enter => ViE.Feature.handleExplorerEnter s
   | Key.char 'i' => pure $ s.setMode Mode.insert
@@ -86,7 +90,13 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
   | Key.char 'b' => handleMotion s EditorState.moveWordBackward
   | Key.char 'e' => handleMotion s EditorState.moveWordEnd
   | Key.char 'x' => pure $ clearInput (EditorState.deleteCharAfterCursor s)
-  | Key.char 'p' => pure $ clearInput (EditorState.pasteBelow s)
+  | Key.char 'p' =>
+      let buf := s.getActiveBuffer
+      let isExplorer := s.explorers.any (fun (id, _) => id == buf.id)
+      if isExplorer then
+        ViE.Feature.toggleExplorerPreview s
+      else
+        pure $ clearInput (EditorState.pasteBelow s)
   | Key.char 'P' => pure $ clearInput (EditorState.pasteAbove s)
   | Key.char 'y' =>
      match s.inputState.previousKey with
@@ -130,13 +140,21 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
          let s' := { s with inputState := { s.inputState with previousKey := none } }
          match c with
          | 't' =>
-            let next := (s.currentGroup + 1) % 10
-            let s'' := s.switchToWorkgroup next
-            pure { s'' with message := s!"Switched to workgroup {next}" }
+            let size := s.workgroups.size
+            if size == 0 then
+              pure s'
+            else
+              let next := (s.currentGroup + 1) % size
+              let s'' := s.switchToWorkgroup next
+              pure { s'' with message := s!"Switched to workgroup {next}" }
          | 'T' =>
-            let prev := if s.currentGroup == 0 then 9 else s.currentGroup - 1
-            let s'' := s.switchToWorkgroup prev
-            pure { s'' with message := s!"Switched to workgroup {prev}" }
+            let size := s.workgroups.size
+            if size == 0 then
+              pure s'
+            else
+              let prev := if s.currentGroup == 0 then size - 1 else s.currentGroup - 1
+              let s'' := s.switchToWorkgroup prev
+              pure { s'' with message := s!"Switched to workgroup {prev}" }
          | 'g' =>
             -- gg implementation
             let n := s.getCount
@@ -168,7 +186,18 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
       | 'J' => pure $ resizeWindow s' .down 0.05
       | 'K' => pure $ resizeWindow s' .up 0.05
       | 'L' => pure $ resizeWindow s' .right 0.05
-      | _ => pure s'
+      | _ =>
+        if c.isDigit then
+          match c.toString.toNat? with
+          | some idx =>
+            if idx < s.workgroups.size then
+              let s'' := s.switchToWorkgroup idx
+              pure { s'' with message := s!"Switched to workgroup {idx}" }
+            else
+              pure s'
+          | none => pure s'
+        else
+          pure s'
   | _ => pure { s with inputState := { s.inputState with countBuffer := "", previousKey := none } },
 
   insert := fun s k => match k with

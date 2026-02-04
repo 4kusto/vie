@@ -3,7 +3,7 @@ import ViE.Types
 namespace ViE
 
 /-- Resolve a file path relative to workspace -/
-def Workspace.resolvePath (ws : Workspace) (path : String) : String :=
+def WorkspaceState.resolvePath (ws : WorkspaceState) (path : String) : String :=
   if path.startsWith "/" then
     -- Absolute path, use as-is
     path

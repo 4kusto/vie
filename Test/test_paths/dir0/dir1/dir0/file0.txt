@@ -1,0 +1,60 @@
+(define (fib n)
+  (if (< n 2)
+      n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(display "fib(0..10) = ")
+(display (map fib (iota 11)))
+(newline)
+
+
+(define (fib n)
+  (if (< n 2)
+      n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(display "fib(0..10) = ")
+(display (map fib (iota 11)))
+(newline)
+
+
+(define (fib n)
+  (if (< n 2)
+      n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(display "fib(0..10) = ")
+(display (map fib (iota 11)))
+(newline)
+
+
+(define (fib n)
+  (if (< n 2)
+      n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(display "fib(0..10) = ")
+(display (map fib (iota 11)))
+(newline)
+
+
+(define (fib n)
+  (if (< n 2)
+      n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(display "fib(0..10) = ")
+(display (map fib (iota 11)))
+(newline)
+
+
+(define (fib n)
+  (if (< n 2)
+      n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+
+(display "fib(0..10) = ")
+(display (map fib (iota 11)))
+(newline)
+
+

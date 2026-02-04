@@ -1,5 +1,6 @@
 import ViE.Data.PieceTable.Piece
 import ViE.Data.PieceTable.Tree
+import ViE.Unicode
 
 namespace ViE
 
@@ -156,9 +157,11 @@ def PieceTable.getLineLength (pt : PieceTable) (lineIdx : Nat) : Option Nat :=
 def PieceTable.getOffsetFromPoint (pt : PieceTable) (row col : Nat) : Option Nat :=
   match PieceTable.getLineRange pt row with
   | some (startOff, len) =>
-      -- Allow col up to len (inclusive)
-      if col <= len then some (startOff + col)
-      else some (startOff + len)
+      -- Col is a display column; convert to byte offset within the line.
+      let lineStr := PieceTree.getSubstring pt.tree startOff len pt
+      let byteOff := ViE.Unicode.displayColToByteOffset lineStr col
+      let clamped := if byteOff <= len then byteOff else len
+      some (startOff + clamped)
   | none => none
 
 
@@ -198,7 +201,14 @@ partial def PieceTable.findLineForOffset (pt : PieceTable) (target : Nat) (low h
 
 def PieceTable.getPointFromOffset (pt : PieceTable) (offset : Nat) : (Nat × Nat) :=
   match PieceTable.findLineForOffset pt offset 0 pt.lineCount with
-  | some (r, c) => (r, c)
+  | some (r, c) =>
+    match PieceTable.getLineRange pt r with
+    | some (startOff, len) =>
+      let rel := if c <= len then c else len
+      let sub := PieceTree.getSubstring pt.tree startOff rel pt
+      let displayCol := ViE.Unicode.stringWidth sub
+      (r, displayCol)
+    | none => (r, c)
   | none => (0, 0) -- Fallback
 
 end ViE

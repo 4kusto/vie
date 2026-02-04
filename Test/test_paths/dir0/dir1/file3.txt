@@ -1,0 +1,102 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+static int is_even(int n) {
+  return n % 2 == 0;
+}
+
+int main(void) {
+  int sum = 0;
+  for (int i = 0; i < 100; i++) {
+    if (is_even(i)) sum += i;
+  }
+  printf("sum of even numbers < 100: %d\n", sum);
+  return 0;
+}
+
+
+#include <stdio.h>
+#include <stdlib.h>
+
+static int is_even(int n) {
+  return n % 2 == 0;
+}
+
+int main(void) {
+  int sum = 0;
+  for (int i = 0; i < 100; i++) {
+    if (is_even(i)) sum += i;
+  }
+  printf("sum of even numbers < 100: %d\n", sum);
+  return 0;
+}
+
+
+#include <stdio.h>
+#include <stdlib.h>
+
+static int is_even(int n) {
+  return n % 2 == 0;
+}
+
+int main(void) {
+  int sum = 0;
+  for (int i = 0; i < 100; i++) {
+    if (is_even(i)) sum += i;
+  }
+  printf("sum of even numbers < 100: %d\n", sum);
+  return 0;
+}
+
+
+#include <stdio.h>
+#include <stdlib.h>
+
+static int is_even(int n) {
+  return n % 2 == 0;
+}
+
+int main(void) {
+  int sum = 0;
+  for (int i = 0; i < 100; i++) {
+    if (is_even(i)) sum += i;
+  }
+  printf("sum of even numbers < 100: %d\n", sum);
+  return 0;
+}
+
+
+#include <stdio.h>
+#include <stdlib.h>
+
+static int is_even(int n) {
+  return n % 2 == 0;
+}
+
+int main(void) {
+  int sum = 0;
+  for (int i = 0; i < 100; i++) {
+    if (is_even(i)) sum += i;
+  }
+  printf("sum of even numbers < 100: %d\n", sum);
+  return 0;
+}
+
+
+#include <stdio.h>
+#include <stdlib.h>
+
+static int is_even(int n) {
+  return n % 2 == 0;
+}
+
+int main(void) {
+  int sum = 0;
+  for (int i = 0; i < 100; i++) {
+    if (is_even(i)) sum += i;
+  }
+  printf("sum of even numbers < 100: %d\n", sum);
+  return 0;
+}
+
+

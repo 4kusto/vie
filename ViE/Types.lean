@@ -22,12 +22,6 @@ instance : ToString Mode where
     | .visual => "VISUAL"
     | .visualBlock => "VISUAL BLOCK"
 
-/-- Workspace configuration -/
-structure Workspace where
-  rootPath : Option String := none
-  name : String := "Untitled"
-deriving Repr, Inhabited
-
 /-- Row index (0-based) with dimensional safety -/
 structure Row where
   val : Nat
@@ -141,15 +135,32 @@ inductive Key where
 
 structure RenderCache where
   /-- Visual string for a line, cached to avoid re-calculating widths/tabs/etc. -/
-  lineMap : Lean.RBMap Row String compare
+  -- Cache key includes scroll column and available width to avoid stale renders.
+  lineMap : Lean.RBMap Row (String × Nat × Nat) compare
+  /-- Raw line string cache (no display transform). -/
+  rawLineMap : Lean.RBMap Row String compare
+  /-- Display-column to byte-offset index cache for a line. -/
+  lineIndexMap : Lean.RBMap Row (Array (Nat × Nat)) compare
   deriving Inhabited
 
 namespace RenderCache
-  def find (c : RenderCache) (r : Row) : Option String :=
+  def find (c : RenderCache) (r : Row) : Option (String × Nat × Nat) :=
     c.lineMap.find? r
 
-  def update (c : RenderCache) (r : Row) (s : String) : RenderCache :=
-    { lineMap := c.lineMap.insert r s }
+  def findRaw (c : RenderCache) (r : Row) : Option String :=
+    c.rawLineMap.find? r
+
+  def findIndex (c : RenderCache) (r : Row) : Option (Array (Nat × Nat)) :=
+    c.lineIndexMap.find? r
+
+  def update (c : RenderCache) (r : Row) (s : String) (scrollCol : Nat) (availableWidth : Nat) : RenderCache :=
+    { c with lineMap := c.lineMap.insert r (s, scrollCol, availableWidth) }
+
+  def updateRaw (c : RenderCache) (r : Row) (s : String) : RenderCache :=
+    { c with rawLineMap := c.rawLineMap.insert r s }
+
+  def updateIndex (c : RenderCache) (r : Row) (idx : Array (Nat × Nat)) : RenderCache :=
+    { c with lineIndexMap := c.lineIndexMap.insert r idx }
 end RenderCache
 
 structure FileBuffer where
@@ -172,15 +183,15 @@ def initialFileBuffer : FileBuffer := {
   dirty := false
   table := ViE.PieceTable.fromString ""
   missingEol := false
-  cache := { lineMap := Lean.RBMap.empty }
+  cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
 }
 
 namespace FileBuffer
   def lineCount (buf : FileBuffer) : Nat :=
-    buf.table.tree.lineBreaks + 1
+    buf.table.lineCount
 
   def clearCache (buf : FileBuffer) : FileBuffer :=
-    { buf with cache := { lineMap := Lean.RBMap.empty } }
+    { buf with cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty } }
 end FileBuffer
 
 structure ViewState where
@@ -198,10 +209,19 @@ structure FileEntry where
   deriving Repr, Inhabited
 
 /-- Explorer state for file navigation -/
+inductive ExplorerMode where
+  | files
+  | workgroups
+  | workspaces
+  deriving Repr, Inhabited, BEq
+
 structure ExplorerState where
   currentPath : String
   entries : List FileEntry
   selectedIndex : Nat
+  mode : ExplorerMode
+  previewWindowId : Option Nat
+  previewBufferId : Option Nat
   deriving Repr, Inhabited
 
 
@@ -221,14 +241,22 @@ structure InputState where
   deriving Repr, Inhabited
 
 
-/-- State for a single workgroup (independent buffer set and layout) -/
-structure WorkgroupState where
+/-- State for a single workspace (project unit). -/
+structure WorkspaceState where
   name : String
+  rootPath : Option String
   buffers : List FileBuffer
   nextBufferId : Nat
   layout : Layout
   activeWindowId : Nat
   nextWindowId : Nat
+  deriving Repr, Inhabited
+
+/-- State for a single workgroup (collection of workspaces). -/
+structure WorkgroupState where
+  name : String
+  workspaces : Array WorkspaceState
+  currentWorkspace : Nat
   deriving Repr, Inhabited
 
 structure EditorState where
@@ -240,7 +268,6 @@ structure EditorState where
   message : String
   shouldQuit : Bool
   config : EditorConfig
-  workspace : Workspace
   clipboard : Option String -- Yank buffer (String instead of TextBuffer)
   selectionStart : Option Point -- Visual mode anchor
   explorers : List (Nat × ExplorerState) -- BufferId × Explorer state

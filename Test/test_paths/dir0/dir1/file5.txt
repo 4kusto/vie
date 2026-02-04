@@ -1,0 +1,54 @@
+let rec fib n =
+  if n <= 1 then n
+  else fib (n - 1) + fib (n - 2)
+
+let () =
+  let values = List.init 16 fib in
+  Printf.printf "fib(0..15) = %s\n" (String.concat ", " (List.map string_of_int values))
+
+
+let rec fib n =
+  if n <= 1 then n
+  else fib (n - 1) + fib (n - 2)
+
+let () =
+  let values = List.init 16 fib in
+  Printf.printf "fib(0..15) = %s\n" (String.concat ", " (List.map string_of_int values))
+
+
+let rec fib n =
+  if n <= 1 then n
+  else fib (n - 1) + fib (n - 2)
+
+let () =
+  let values = List.init 16 fib in
+  Printf.printf "fib(0..15) = %s\n" (String.concat ", " (List.map string_of_int values))
+
+
+let rec fib n =
+  if n <= 1 then n
+  else fib (n - 1) + fib (n - 2)
+
+let () =
+  let values = List.init 16 fib in
+  Printf.printf "fib(0..15) = %s\n" (String.concat ", " (List.map string_of_int values))
+
+
+let rec fib n =
+  if n <= 1 then n
+  else fib (n - 1) + fib (n - 2)
+
+let () =
+  let values = List.init 16 fib in
+  Printf.printf "fib(0..15) = %s\n" (String.concat ", " (List.map string_of_int values))
+
+
+let rec fib n =
+  if n <= 1 then n
+  else fib (n - 1) + fib (n - 2)
+
+let () =
+  let values = List.init 16 fib in
+  Printf.printf "fib(0..15) = %s\n" (String.concat ", " (List.map string_of_int values))
+
+

@@ -3,6 +3,7 @@ import ViE.State.Layout
 import ViE.State.Movement
 import ViE.Types
 import ViE.Buffer.Content
+import ViE.Unicode
 
 namespace ViE
 
@@ -57,13 +58,18 @@ def EditorState.getSelectedText (s : EditorState) : String :=
       let lines := (List.range (maxRow - minRow + 1)).map fun i =>
         let r := minRow + i
         let line := ViE.getLineFromBuffer buffer ⟨r⟩ |>.getD ""
-        let sub := line.toRawSubstring.drop minCol |>.take (maxCol - minCol + 1)
-        sub.toString
+        let sub := ViE.Unicode.dropByDisplayWidth line.toRawSubstring minCol
+        ViE.Unicode.takeByDisplayWidth sub (maxCol - minCol + 1)
       String.intercalate "\n" lines
     else
       let (p1, p2) := normalizeRange startPt s.getCursor
-      let startOff := buffer.table.getOffsetFromPoint p1.row.val p1.col.val |>.getD 0
-      let endOff := buffer.table.getOffsetFromPoint p2.row.val (p2.col.val + 1) |>.getD buffer.table.tree.length
+      let startOff := ViE.getOffsetFromPointInBuffer buffer p1.row.val p1.col.val |>.getD 0
+      let lineStr := ViE.getLineFromBuffer buffer p2.row |>.getD ""
+      let endCol := if p2.col.val < ViE.Unicode.stringWidth lineStr then
+        ViE.Unicode.nextDisplayCol lineStr p2.col.val
+      else
+        p2.col.val
+      let endOff := ViE.getOffsetFromPointInBuffer buffer p2.row.val endCol |>.getD buffer.table.tree.length
       PieceTree.getSubstring buffer.table.tree startOff (endOff - startOff) buffer.table
 
 def EditorState.yankSelection (s : EditorState) : EditorState :=
@@ -86,8 +92,10 @@ def EditorState.deleteSelection (s : EditorState) : EditorState :=
         st.updateActiveBuffer fun buffer =>
           match buffer.table.getLineRange r with
           | some (lineStart, lineLen) =>
-            let start := lineStart + minCol
-            let len := min (maxCol - minCol + 1) (if lineLen > minCol then lineLen - minCol else 0)
+            let start := ViE.getOffsetFromPointInBuffer buffer r minCol |>.getD (lineStart + lineLen)
+            let endCol := maxCol + 1
+            let endOff := ViE.getOffsetFromPointInBuffer buffer r endCol |>.getD (lineStart + lineLen)
+            let len := if endOff > start then endOff - start else 0
             if len > 0 then
               { buffer with table := buffer.table.delete start len start, dirty := true }
             else buffer
@@ -96,8 +104,13 @@ def EditorState.deleteSelection (s : EditorState) : EditorState :=
     else
       let (p1, p2) := normalizeRange startPt s.getCursor
       let s' := s.updateActiveBuffer fun buffer =>
-        let startOff := buffer.table.getOffsetFromPoint p1.row.val p1.col.val |>.getD 0
-        let endOff := buffer.table.getOffsetFromPoint p2.row.val (p2.col.val + 1) |>.getD buffer.table.tree.length
+        let startOff := ViE.getOffsetFromPointInBuffer buffer p1.row.val p1.col.val |>.getD 0
+        let lineStr := ViE.getLineFromBuffer buffer p2.row |>.getD ""
+        let endCol := if p2.col.val < ViE.Unicode.stringWidth lineStr then
+          ViE.Unicode.nextDisplayCol lineStr p2.col.val
+        else
+          p2.col.val
+        let endOff := ViE.getOffsetFromPointInBuffer buffer p2.row.val endCol |>.getD buffer.table.tree.length
         { buffer with table := buffer.table.delete startOff (endOff - startOff) startOff, dirty := true }
       s'.exitVisualMode |>.setCursor p1
 

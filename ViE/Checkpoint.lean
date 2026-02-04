@@ -7,8 +7,8 @@ def sessionFile : String := "/tmp/editor_session.tmp"
 
 /-- Save current session state to a temporary file. -/
 def saveSession (state : EditorState) : IO Unit := do
-  let wg := state.getCurrentWorkgroup
-  let buffers := wg.buffers.filter (fun b => b.filename.isSome)
+  let ws := state.getCurrentWorkspace
+  let buffers := ws.buffers.filter (fun b => b.filename.isSome)
 
   let activeBuffer := state.getActiveBuffer
   let activeIdx := buffers.findIdx? (fun b => b.id == activeBuffer.id) |>.getD 0

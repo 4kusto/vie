@@ -2,7 +2,7 @@ namespace ViE.Unicode
 
 /-- Ranges of characters that have a visual width of 2 (Fullwidth/Wide).
     Based on EastAsianWidth.txt (Wide or Fullwidth). -/
-def wideRanges : List (Nat × Nat) := [
+def wideRangesBmp : Array (Nat × Nat) := #[
   (0x1100, 0x115F), -- Hangul Jamo
   (0x2329, 0x232A), -- Angle brackets
   (0x2E80, 0x303E), -- CJK Radicals / Punctuation
@@ -15,14 +15,34 @@ def wideRanges : List (Nat × Nat) := [
   (0xFE10, 0xFE19), -- Vertical forms
   (0xFE30, 0xFE6F), -- CJK Compatibility Forms
   (0xFF01, 0xFF60), -- Fullwidth Forms
-  (0xFFE0, 0xFFE6), -- Fullwidth currency/signs
+  (0xFFE0, 0xFFE6)  -- Fullwidth currency/signs
+]
+
+def wideRangesSupplemental : Array (Nat × Nat) := #[
   (0x1F300, 0x1F64F), -- Miscellaneous Symbols and Pictographs (Emojis)
   (0x1F900, 0x1F9FF)  -- Supplemental Symbols and Pictographs (some, generic range)
 ]
 
 /-- Check if a character code is in a wide range. -/
 def isWide (c : Nat) : Bool :=
-  wideRanges.any fun (start, stop) => c >= start && c <= stop
+  if c < 0x1100 then
+    false
+  else
+  let ranges := if c <= 0xFFFF then wideRangesBmp else wideRangesSupplemental
+  let rec loop (lo hi : Nat) : Bool :=
+    if h : lo < hi then
+      let mid := (lo + hi) / 2
+      let (start, stop) := ranges[mid]!
+      if c < start then
+        loop lo mid
+      else if c > stop then
+        loop (mid + 1) hi
+      else
+        true
+    else
+      false
+    termination_by hi - lo
+  loop 0 ranges.size
 
 /-- Get the visual width of a character.
     Returns 2 for wide characters, 0 for null/combining (simplified), 1 for others. -/
@@ -91,5 +111,139 @@ def countChars (bytes : ByteArray) (start len : Nat) : Nat :=
         loop (i + 1) cnt
   loop start 0
 
+
+/-- Convert a display column to a character index (0-based).
+    If the column is in the middle of a wide character, it snaps to that character's index. -/
+def displayColToCharIndex (s : String) (col : Nat) : Nat :=
+  let rec loop (cs : List Char) (idx width : Nat) : Nat :=
+    match cs with
+    | [] => idx
+    | c :: rest =>
+      let w := charWidth c
+      if width + w > col then
+        idx
+      else
+        loop rest (idx + 1) (width + w)
+  loop s.toList 0 0
+
+/-- Display width of the first `idx` characters in a string. -/
+def displayWidthAtCharIndex (s : String) (idx : Nat) : Nat :=
+  let rec loop (cs : List Char) (i acc : Nat) : Nat :=
+    match cs with
+    | [] => acc
+    | c :: rest =>
+      if i >= idx then
+        acc
+      else
+        loop rest (i + 1) (acc + charWidth c)
+  loop s.toList 0 0
+
+/-- Convert a display column to a UTF-8 byte offset within a string. -/
+def displayColToByteOffset (s : String) (col : Nat) : Nat :=
+  let rec loop (cs : List Char) (byteAcc widthAcc : Nat) : Nat :=
+    match cs with
+    | [] => byteAcc
+    | c :: rest =>
+      let w := charWidth c
+      let b := c.toString.toUTF8.size
+      if widthAcc + w > col then
+        byteAcc
+      else
+        loop rest (byteAcc + b) (widthAcc + w)
+  loop s.toList 0 0
+
+/-- Build an index mapping display columns to UTF-8 byte offsets at character boundaries.
+    The result includes the starting boundary (0,0) and the final boundary (totalWidth,totalBytes). -/
+def buildDisplayByteIndex (s : String) : Array (Nat × Nat) :=
+  let rec loop (cs : List Char) (disp bytes : Nat) (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
+    match cs with
+    | [] => acc
+    | c :: rest =>
+      let w := charWidth c
+      let b := c.toString.toUTF8.size
+      let disp' := disp + w
+      let bytes' := bytes + b
+      loop rest disp' bytes' (acc.push (disp', bytes'))
+  loop s.toList 0 0 #[(0, 0)]
+
+/-- Convert a display column to a UTF-8 byte offset using a precomputed index. -/
+def displayColToByteOffsetFromIndex (idx : Array (Nat × Nat)) (col : Nat) : Nat :=
+  if idx.isEmpty then
+    0
+  else
+    let rec loop (lo hi : Nat) (best : Nat) : Nat :=
+      if h : lo < hi then
+        let mid := (lo + hi) / 2
+        let (disp, bytes) := idx[mid]!
+        if col < disp then
+          loop lo mid best
+        else
+          loop (mid + 1) hi bytes
+      else
+        best
+      termination_by hi - lo
+    loop 0 idx.size 0
+
+/-- Compute the next display column (advancing by one character). -/
+def nextDisplayCol (s : String) (col : Nat) : Nat :=
+  let idx := displayColToCharIndex s col
+  let startWidth := displayWidthAtCharIndex s idx
+  if col < startWidth then
+    startWidth
+  else
+    let chars := s.toList
+    if idx < chars.length then
+      let w := charWidth (chars[idx]!)
+      startWidth + w
+    else
+      col
+
+/-- Compute the previous display column (moving back by one character). -/
+def prevDisplayCol (s : String) (col : Nat) : Nat :=
+  if col == 0 then
+    0
+  else
+    let idx := displayColToCharIndex s col
+    let startWidth := displayWidthAtCharIndex s idx
+    if col > startWidth then
+      startWidth
+    else if idx == 0 then
+      0
+    else
+      displayWidthAtCharIndex s (idx - 1)
+
+/-- Drop `width` display columns from the start of a substring. -/
+def dropByDisplayWidth (s : Substring.Raw) (width : Nat) : Substring.Raw :=
+  let rec loop (i : String.Pos.Raw) (acc : Nat) : Substring.Raw :=
+    if h : i.byteIdx < s.bsize then
+      let c := s.get i
+      let w := charWidth c
+      if acc + w > width then
+        s.extract i ⟨s.bsize⟩
+      else
+        let i' := s.next i
+        have := Nat.sub_lt_sub_left h (Substring.Raw.lt_next s i h)
+        loop i' (acc + w)
+    else
+      s.extract i ⟨s.bsize⟩
+    termination_by s.bsize - i.1
+  loop 0 0
+
+/-- Take characters from substring until visual width limit is reached. -/
+def takeByDisplayWidth (s : Substring.Raw) (width : Nat) : String :=
+  let rec loop (i : String.Pos.Raw) (currW : Nat) (acc : String) : String :=
+    if h : i.byteIdx < s.bsize then
+      let c := s.get i
+      let w := charWidth c
+      if currW + w <= width then
+        let i' := s.next i
+        have := Nat.sub_lt_sub_left h (Substring.Raw.lt_next s i h)
+        loop i' (currW + w) (acc ++ getDisplayString c)
+      else
+        acc
+    else
+      acc
+    termination_by s.bsize - i.1
+  loop 0 0 ""
 
 end ViE.Unicode
