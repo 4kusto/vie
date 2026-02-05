@@ -14,6 +14,7 @@ import Test.PieceTable.Basic
 import Test.PieceTable.UndoRedo
 import Test.PieceTable.Appended
 import Test.PieceTable.Stress
+import Test.Scroll
 
 def test : IO Unit := do
   IO.println "Running all tests..."
@@ -29,6 +30,7 @@ def test : IO Unit := do
   Test.PreviewData.test
   Test.WorkgroupExplorer.test
   Test.ExplorerPreview.test
+  Test.Scroll.test
   Test.PieceTable.Basic.test
   Test.PieceTable.UndoRedo.test
   Test.PieceTable.Appended.test

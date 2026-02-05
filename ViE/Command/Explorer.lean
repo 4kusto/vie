@@ -28,6 +28,81 @@ def getSelectedEntry (state : EditorState) (explorer : ExplorerState) : Option F
     else
       none
 
+def getSelectedIndex (state : EditorState) (explorer : ExplorerState) : Option Nat :=
+  let cursor := state.getCursor
+  if cursor.row < 2 then
+    none
+  else
+    let idx := cursor.row - 2
+    if idx.val < explorer.entries.length then
+      some idx.val
+    else
+      none
+
+def buildWorkspacePreviewLines (ws : WorkspaceState) : List String :=
+  let header := [s!"Workspace: {ws.name}", ""]
+  let entries := ws.buffers.map fun b =>
+    match b.filename with
+    | some name => name
+    | none => s!"[Untitled:{b.id}]"
+  if entries.isEmpty then
+    header ++ ["(no buffers)"]
+  else
+    header ++ entries
+
+def buildWorkgroupPreviewLines (wg : WorkgroupState) : List String :=
+  let header := [s!"Workgroup: {wg.name}", ""]
+  let entries := wg.workspaces.toList.map (fun ws => ws.name)
+  if entries.isEmpty then
+    header ++ ["(no workspaces)"]
+  else
+    header ++ entries
+
+def ensurePreviewTextBuffer (state : EditorState) (explorer : ExplorerState) (title : String) (lines : List String) : (EditorState × Nat) :=
+  let content : TextBuffer := if lines.isEmpty then #[#[]] else lines.toArray.map stringToLine
+  let buf := { ViE.Buffer.fileBufferFromTextBuffer 0 (some s!"preview://{title}") content with dirty := false }
+  match explorer.previewBufferId with
+  | some pid =>
+    let ws := state.getCurrentWorkspace
+    if ws.buffers.any (fun b => b.id == pid) then
+      let updated := { buf with id := pid }
+      let s' := state.updateCurrentWorkspace fun ws =>
+        { ws with buffers := ws.buffers.map (fun b => if b.id == pid then updated else b) }
+      (s', pid)
+    else
+      let (pid, s') := ViE.Buffer.addBuffer state buf
+      (s', pid)
+  | none =>
+    let (pid, s') := ViE.Buffer.addBuffer state buf
+    (s', pid)
+
+def getPreviewWorkspace (state : EditorState) (explorer : ExplorerState) : WorkspaceState :=
+  let wg := state.getCurrentWorkgroup
+  match getSelectedIndex state explorer with
+  | some idx =>
+    if idx >= 2 then
+      let real := idx - 2
+      if h : real < wg.workspaces.size then
+        wg.workspaces[real]!
+      else
+        state.getCurrentWorkspace
+    else
+      state.getCurrentWorkspace
+  | none => state.getCurrentWorkspace
+
+def getPreviewWorkgroup (state : EditorState) (explorer : ExplorerState) : WorkgroupState :=
+  match getSelectedIndex state explorer with
+  | some idx =>
+    if idx >= 2 then
+      let real := idx - 2
+      if h : real < state.workgroups.size then
+        state.workgroups[real]!
+      else
+        state.getCurrentWorkgroup
+    else
+      state.getCurrentWorkgroup
+  | none => state.getCurrentWorkgroup
+
 def ensurePreviewBuffer (state : EditorState) (explorer : ExplorerState) (entry : FileEntry) : IO (EditorState × Nat) := do
   let resolved := entry.path
   let loaded ← ViE.loadPreviewBufferByteArray resolved previewMaxBytes
@@ -55,18 +130,36 @@ def refreshExplorerPreview (state : EditorState) : IO EditorState := do
   match explorerOpt with
   | none => return state
   | some (bufId, explorer) =>
-    if explorer.mode != .files then
-      return state
     match explorer.previewWindowId with
     | none => return state
     | some previewWinId =>
-      match getSelectedEntry state explorer with
-      | none => return state
-      | some entry =>
-        if entry.isDirectory then
-          return state
-        else
-          let (s1, previewBufId) ← ensurePreviewBuffer state explorer entry
+      match explorer.mode with
+      | .files =>
+        match getSelectedEntry state explorer with
+        | none => return state
+        | some entry =>
+          if entry.isDirectory then
+            return state
+          else
+            let (s1, previewBufId) ← ensurePreviewBuffer state explorer entry
+            let s2 := s1.updateCurrentWorkspace fun ws =>
+              { ws with layout := ws.layout.updateView previewWinId (fun v =>
+                { v with bufferId := previewBufId, cursor := Point.zero, scrollRow := 0, scrollCol := 0 }) }
+            let s3 := updateExplorerState s2 bufId (fun ex => { ex with previewBufferId := some previewBufId })
+            return s3
+      | .workspaces =>
+          let ws := getPreviewWorkspace state explorer
+          let lines := buildWorkspacePreviewLines ws
+          let (s1, previewBufId) := ensurePreviewTextBuffer state explorer ws.name lines
+          let s2 := s1.updateCurrentWorkspace fun ws =>
+            { ws with layout := ws.layout.updateView previewWinId (fun v =>
+              { v with bufferId := previewBufId, cursor := Point.zero, scrollRow := 0, scrollCol := 0 }) }
+          let s3 := updateExplorerState s2 bufId (fun ex => { ex with previewBufferId := some previewBufId })
+          return s3
+      | .workgroups =>
+          let wg := getPreviewWorkgroup state explorer
+          let lines := buildWorkgroupPreviewLines wg
+          let (s1, previewBufId) := ensurePreviewTextBuffer state explorer wg.name lines
           let s2 := s1.updateCurrentWorkspace fun ws =>
             { ws with layout := ws.layout.updateView previewWinId (fun v =>
               { v with bufferId := previewBufId, cursor := Point.zero, scrollRow := 0, scrollCol := 0 }) }
@@ -74,29 +167,39 @@ def refreshExplorerPreview (state : EditorState) : IO EditorState := do
           return s3
 
 def openExplorerDefaultPreview (state : EditorState) (bufId : Nat) (explorer : ExplorerState) : IO EditorState := do
-  if explorer.mode != .files then
-    return state
   match explorer.previewWindowId with
   | some _ => return state
   | none =>
     let ws := state.getCurrentWorkspace
     let previewWinId := ws.nextWindowId
     let s1 := ViE.Window.splitWindow state false
-    let entryOpt := getSelectedEntry s1 explorer
     let (s2, previewBufId) ←
-      match entryOpt with
-      | some entry =>
-        if entry.isDirectory then
+      match explorer.mode with
+      | .files =>
+        let entryOpt := getSelectedEntry s1 explorer
+        match entryOpt with
+        | some entry =>
+          if entry.isDirectory then
+            let content : TextBuffer := #[#[]]
+            let buf := { ViE.Buffer.fileBufferFromTextBuffer 0 (some "preview://") content with dirty := false }
+            let (pid, s2) := ViE.Buffer.addBuffer s1 buf
+            pure (s2, pid)
+          else
+            ensurePreviewBuffer s1 explorer entry
+        | none =>
           let content : TextBuffer := #[#[]]
           let buf := { ViE.Buffer.fileBufferFromTextBuffer 0 (some "preview://") content with dirty := false }
           let (pid, s2) := ViE.Buffer.addBuffer s1 buf
           pure (s2, pid)
-        else
-          ensurePreviewBuffer s1 explorer entry
-      | none =>
-        let content : TextBuffer := #[#[]]
-        let buf := { ViE.Buffer.fileBufferFromTextBuffer 0 (some "preview://") content with dirty := false }
-        let (pid, s2) := ViE.Buffer.addBuffer s1 buf
+      | .workspaces =>
+        let ws := getPreviewWorkspace s1 explorer
+        let lines := buildWorkspacePreviewLines ws
+        let (s2, pid) := ensurePreviewTextBuffer s1 explorer ws.name lines
+        pure (s2, pid)
+      | .workgroups =>
+        let wg := getPreviewWorkgroup s1 explorer
+        let lines := buildWorkgroupPreviewLines wg
+        let (s2, pid) := ensurePreviewTextBuffer s1 explorer wg.name lines
         pure (s2, pid)
     let s3 := s2.updateCurrentWorkspace fun ws =>
       { ws with layout := ws.layout.updateView previewWinId (fun v =>
@@ -111,8 +214,6 @@ def toggleExplorerPreview (state : EditorState) : IO EditorState := do
   match explorerOpt with
   | none => return state
   | some (bufId, explorer) =>
-    if explorer.mode != .files then
-      return { state with message := "Preview is only available in file explorer" }
     match explorer.previewWindowId with
     | some previewWinId =>
       let s1 := state.updateCurrentWorkspace fun ws =>
@@ -122,21 +223,47 @@ def toggleExplorerPreview (state : EditorState) : IO EditorState := do
       let s2 := updateExplorerState s1 bufId (fun ex => { ex with previewWindowId := none, previewBufferId := none })
       return { s2 with message := "Preview closed" }
     | none =>
-      match getSelectedEntry state explorer with
-      | none => return { state with message := "Preview: no selection" }
-      | some entry =>
-        if entry.isDirectory then
-          return { state with message := "Preview: directory" }
-        else
+      match explorer.mode with
+      | .files =>
+        match getSelectedEntry state explorer with
+        | none => return { state with message := "Preview: no selection" }
+        | some entry =>
+          if entry.isDirectory then
+            return { state with message := "Preview: directory" }
+          else
+            let ws := state.getCurrentWorkspace
+            let previewWinId := ws.nextWindowId
+            let s1 := ViE.Window.splitWindow state false
+            let (s2, previewBufId) ← ensurePreviewBuffer s1 explorer entry
+            let s3 := s2.updateCurrentWorkspace fun ws =>
+              { ws with layout := ws.layout.updateView previewWinId (fun v =>
+                { v with bufferId := previewBufId, cursor := Point.zero, scrollRow := 0, scrollCol := 0 }) }
+            let s4 := updateExplorerState s3 bufId (fun ex => { ex with previewWindowId := some previewWinId, previewBufferId := some previewBufId })
+            return { s4 with message := "Preview opened" }
+      | .workspaces =>
           let ws := state.getCurrentWorkspace
           let previewWinId := ws.nextWindowId
           let s1 := ViE.Window.splitWindow state false
-          let (s2, previewBufId) ← ensurePreviewBuffer s1 explorer entry
+          let previewWs := getPreviewWorkspace s1 explorer
+          let lines := buildWorkspacePreviewLines previewWs
+          let (s2, previewBufId) := ensurePreviewTextBuffer s1 explorer previewWs.name lines
           let s3 := s2.updateCurrentWorkspace fun ws =>
             { ws with layout := ws.layout.updateView previewWinId (fun v =>
               { v with bufferId := previewBufId, cursor := Point.zero, scrollRow := 0, scrollCol := 0 }) }
           let s4 := updateExplorerState s3 bufId (fun ex => { ex with previewWindowId := some previewWinId, previewBufferId := some previewBufId })
-          return { s4 with message := s!"Preview: {entry.name}" }
+          return { s4 with message := "Preview opened" }
+      | .workgroups =>
+          let ws := state.getCurrentWorkspace
+          let previewWinId := ws.nextWindowId
+          let s1 := ViE.Window.splitWindow state false
+          let previewWg := getPreviewWorkgroup s1 explorer
+          let lines := buildWorkgroupPreviewLines previewWg
+          let (s2, previewBufId) := ensurePreviewTextBuffer s1 explorer previewWg.name lines
+          let s3 := s2.updateCurrentWorkspace fun ws =>
+            { ws with layout := ws.layout.updateView previewWinId (fun v =>
+              { v with bufferId := previewBufId, cursor := Point.zero, scrollRow := 0, scrollCol := 0 }) }
+          let s4 := updateExplorerState s3 bufId (fun ex => { ex with previewWindowId := some previewWinId, previewBufferId := some previewBufId })
+          return { s4 with message := "Preview opened" }
 
 /-- Open the file explorer at the specified path (or current workspace root) -/
 def openExplorer (state : EditorState) (pathArg : String) : IO EditorState := do
@@ -343,7 +470,8 @@ def openWorkspaceExplorer (state : EditorState) : IO EditorState := do
   let (bufferId, s') := ViE.Buffer.createNewBuffer state contentBuffer (some "explorer://workgroup")
   let s'' := { s' with explorers := (bufferId, explorerState) :: s'.explorers }
   let s''' := s''.updateActiveView fun v => { v with bufferId := bufferId, cursor := {row := 2, col := 0}, scrollRow := 0, scrollCol := 0 }
-  return { s''' with message := s!"Workspace Explorer: {wg.name}" }
+  let s'''' := { s''' with message := s!"Workspace Explorer: {wg.name}" }
+  return (← openExplorerDefaultPreview s'''' bufferId explorerState)
 
 /-- Open the workgroup explorer to list workgroups. -/
 def openWorkgroupExplorer (state : EditorState) : IO EditorState := do
@@ -389,7 +517,8 @@ def openWorkgroupExplorer (state : EditorState) : IO EditorState := do
   let s'' := { s' with explorers := (bufferId, explorerState) :: s'.explorers }
   let s''' := s''.updateActiveView fun v =>
     { v with bufferId := bufferId, cursor := {row := ⟨2 + explorerState.selectedIndex⟩, col := 0}, scrollRow := 0, scrollCol := 0 }
-  return { s''' with message := "Workgroup Explorer" }
+  let s'''' := { s''' with message := "Workgroup Explorer" }
+  return (← openExplorerDefaultPreview s'''' bufferId explorerState)
 
 /-- Handle Enter key in explorer buffer -/
 def handleExplorerEnter (state : EditorState) : IO EditorState := do

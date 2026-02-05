@@ -44,6 +44,19 @@ def test : IO Unit := do
   assertEqual "Explorer contains Group B" true (bufText.contains "Group B")
   assertEqual "Explorer marks current workgroup" true (bufText.contains "*")
 
+  let explorerOpt := s2.explorers.find? (fun (id, _) => id == s2.getActiveBuffer.id)
+  match explorerOpt with
+  | none => throw (IO.userError "Workgroup explorer not registered")
+  | some (_, explorer) =>
+    assertEqual "Workgroup explorer preview window exists" true explorer.previewWindowId.isSome
+    let previewWinId := explorer.previewWindowId.get!
+    let wsPrev := s2.getCurrentWorkspace
+    let previewView := wsPrev.layout.findView previewWinId |>.getD initialView
+    let previewBuf := wsPrev.buffers.find? (fun b => b.id == previewView.bufferId) |>.getD initialBuffer
+    let previewText := previewBuf.table.toString
+    assertEqual "Workgroup preview includes Project A" true (previewText.contains "Project A")
+    assertEqual "Workgroup preview includes Project B" true (previewText.contains "Project B")
+
   let s3 := setCursorRow s2 2
   let s4 ← ViE.Feature.handleExplorerEnter s3
   assertEqual "New workgroup enters command mode" Mode.command s4.mode

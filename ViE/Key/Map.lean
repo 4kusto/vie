@@ -50,8 +50,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
           let parentPath := match (System.FilePath.mk explorer.currentPath).parent with
             | some p => p.toString
             | none => "/"
-          let s' := { s with inputState := { s.inputState with commandBuffer := s!"ee {parentPath}" } }
-          ViE.Command.executeCommand commands s'
+          ViE.Feature.openExplorerWithPreview s parentPath explorer.previewWindowId explorer.previewBufferId
         | none => pure $ clearInput (EditorState.moveCursorLeftN s s.getCount)
       else
 

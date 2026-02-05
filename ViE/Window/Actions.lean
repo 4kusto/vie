@@ -185,9 +185,8 @@ def cycleWindow (state : EditorState) : EditorState :=
 
 def enforceScroll (state : EditorState) : EditorState :=
   let (h, w) := state.getActiveWindowBounds
-  -- Active window height. Reserve 1 line for status bar?
-  -- UI logic reserves 1 for status bar in split rendering.
-  let linesInView := if h > 1 then h - 1 else 1
+  -- Active window height already excludes the global status line.
+  let linesInView := if h > 0 then h else 1
 
   -- Vertical Scroll
   let (sRow, sCol) := state.getScroll
@@ -197,7 +196,7 @@ def enforceScroll (state : EditorState) : EditorState :=
     if cursor.row.val < sRow.val then
       state.setScroll cursor.row sCol
     else if cursor.row.val >= sRow.val + linesInView then
-      let newScrollRow : Row := ⟨sRow.val + linesInView - 1⟩
+      let newScrollRow : Row := ⟨cursor.row.val - (linesInView - 1)⟩
       state.setScroll newScrollRow sCol
     else
       state

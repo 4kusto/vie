@@ -7,6 +7,8 @@ import ViE.Buffer.Content
 import ViE.Basic
 import Test.Utils
 
+set_option maxRecDepth 2048
+
 namespace Test.Workspace
 
 open Test.Utils
@@ -104,6 +106,36 @@ def test : IO Unit := do
 
   let s12 ← ViE.Command.cmdWs ["close"] s11
   assertEqual "Workspace close switches to previous" "Project E" s12.getCurrentWorkspace.name
+
+  IO.println "Starting Workspace Explorer Preview Test..."
+  let bufP1 : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 1 (some "/tmp/a.txt") #[stringToLine "A"]
+  let bufP2 : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 2 (some "/tmp/b.txt") #[stringToLine "B"]
+  let wsP : WorkspaceState := {
+    name := "WS-P"
+    rootPath := none
+    buffers := [bufP1, bufP2]
+    nextBufferId := 3
+    layout := .window 0 { initialView with bufferId := 1 }
+    activeWindowId := 0
+    nextWindowId := 1
+  }
+  let s12a := addWorkspace s12 wsP
+  let wgP := s12a.getCurrentWorkgroup
+  let idxP := if wgP.workspaces.size == 0 then 0 else wgP.workspaces.size - 1
+  let s12b := switchWorkspace s12a idxP
+  let s12c ← ViE.Feature.openWorkspaceExplorer s12b
+  let explorerOpt := s12c.explorers.find? (fun (id, _) => id == s12c.getActiveBuffer.id)
+  match explorerOpt with
+  | none => throw (IO.userError "Workspace explorer not registered")
+  | some (_, explorer) =>
+    assertEqual "Workspace explorer preview window exists" true explorer.previewWindowId.isSome
+    let previewWinId := explorer.previewWindowId.get!
+    let wsPrev := s12c.getCurrentWorkspace
+    let previewView := wsPrev.layout.findView previewWinId |>.getD initialView
+    let previewBuf := wsPrev.buffers.find? (fun b => b.id == previewView.bufferId) |>.getD initialBuffer
+    let previewText := previewBuf.table.toString
+    assertEqual "Workspace preview includes a.txt" true (previewText.contains "/tmp/a.txt")
+    assertEqual "Workspace preview includes b.txt" true (previewText.contains "/tmp/b.txt")
 
   IO.println "Starting Workspace Restore Test..."
   let bufA : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 0 none #[stringToLine "WS-A"]
