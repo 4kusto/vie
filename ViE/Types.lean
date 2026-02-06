@@ -10,6 +10,8 @@ inductive Mode where
   | normal
   | insert
   | command
+  | searchForward
+  | searchBackward
   | visual
   | visualBlock
   deriving Repr, BEq, Inhabited
@@ -19,6 +21,8 @@ instance : ToString Mode where
     | .normal => "NORMAL"
     | .insert => "INSERT"
     | .command => "COMMAND"
+    | .searchForward => "SEARCH"
+    | .searchBackward => "SEARCH"
     | .visual => "VISUAL"
     | .visualBlock => "VISUAL BLOCK"
 
@@ -119,7 +123,46 @@ structure EditorConfig where
   resetStyle : String
   fileIcon : String
   dirIcon : String
+  searchHighlightStyle : String
+  searchHighlightCursorStyle : String
+  searchBloomEnabled : Bool
+  searchBloomMinBytes : Nat
+  searchBloomCacheMax : Nat
   historyLimit : Nat := 100
+  deriving Inhabited
+
+inductive SearchDirection where
+  | forward
+  | backward
+  deriving Repr, Inhabited, BEq
+
+structure SearchState where
+  pattern : String
+  direction : SearchDirection
+  useBloom : Bool
+  lastMatch : Option Nat
+  lastSearchOffset : Nat
+  cache : Array Nat
+  cacheMax : Nat
+  lineMatches : Lean.RBMap Row (String × Array (Nat × Nat)) compare
+  lineOrder : Array Row
+  lineCacheMax : Nat
+  bloomCache : Lean.RBMap Nat ByteArray compare
+  bloomOrder : Array Nat
+  bloomCacheMax : Nat
+  deriving Inhabited
+
+inductive RegisterKind where
+  | charwise
+  | linewise
+  | blockwise
+  deriving Repr, Inhabited, BEq
+
+structure Register where
+  kind : RegisterKind
+  text : String
+  blockLines : List String
+  blockWidth : Nat
   deriving Repr, Inhabited
 
 inductive Key where
@@ -238,6 +281,9 @@ structure InputState where
   commandBuffer : String
   pendingKeys : String
   lastInputTime : Nat
+  lastSearchInputTime : Nat
+  lastSearchRunTime : Nat
+  pendingSearch : Bool
   deriving Repr, Inhabited
 
 
@@ -268,9 +314,10 @@ structure EditorState where
   message : String
   shouldQuit : Bool
   config : EditorConfig
-  clipboard : Option String -- Yank buffer (String instead of TextBuffer)
+  clipboard : Option Register -- Yank buffer
   selectionStart : Option Point -- Visual mode anchor
   explorers : List (Nat × ExplorerState) -- BufferId × Explorer state
+  searchState : Option SearchState
   -- Temporary input state
   inputState : InputState
   -- UI dimensions (updated frequently)

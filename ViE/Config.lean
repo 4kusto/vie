@@ -1,4 +1,5 @@
 import ViE.State
+import ViE.Key.Handler
 
 namespace ViE
 
@@ -126,6 +127,8 @@ def update (config : Config) (state : EditorState) (k : Key) : IO EditorState :=
   | .normal => config.bindings.normal state k
   | .insert => config.bindings.insert state k
   | .command => config.bindings.command state k
+  | .searchForward => ViE.Key.handleSearchInput state k
+  | .searchBackward => ViE.Key.handleSearchInput state k
   | .visual => config.bindings.visual state k
   | .visualBlock => config.bindings.visualBlock state k
 

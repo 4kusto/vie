@@ -42,6 +42,32 @@ def NodeCapacity : Nat := 32
 /-- Maximum piece size to bound linear scans (2KB) -/
 def ChunkSize : Nat := 2048
 
+/-- Bloom filter bit size for trigram indexing. -/
+def BloomBits : Nat := 4096
+
+/-- Bloom filter byte size. -/
+def BloomBytes : Nat := BloomBits / 8
+
+/-- Build full bloom bits for leaf nodes (startup cost). -/
+def BloomBuildLeafBits : Bool := false
+
+/-- Search metadata for a piece tree node. -/
+structure SearchBloom where
+  bits : ByteArray
+  prefixBytes : Array UInt8
+  suffixBytes : Array UInt8
+  deriving Inhabited
+
+def SearchBloom.empty : SearchBloom := {
+  bits := ByteArray.mk (Array.replicate BloomBytes (0 : UInt8)),
+  prefixBytes := #[],
+  suffixBytes := #[]
+}
+
+instance : Repr SearchBloom where
+  reprPrec sb _ :=
+    s!"SearchBloom(bits={sb.bits.size}, prefix={sb.prefixBytes}, suffix={sb.suffixBytes})"
+
 /-- Tracking the last insertion for merging contiguous edits -/
 structure LastInsert where
   docOffset : Nat
@@ -52,8 +78,8 @@ structure LastInsert where
 /-- A node in the B+ Piece Tree -/
 inductive PieceTree where
   | empty
-  | leaf (pieces : Array Piece) (stats : Stats)
-  | internal (children : Array PieceTree) (stats : Stats)
+  | leaf (pieces : Array Piece) (stats : Stats) (searchMeta : SearchBloom)
+  | internal (children : Array PieceTree) (stats : Stats) (searchMeta : SearchBloom)
   deriving Inhabited, Repr
 
 structure PieceTable where

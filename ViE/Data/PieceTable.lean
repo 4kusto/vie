@@ -35,7 +35,8 @@ def PieceTable.fromByteArray (bytes : ByteArray) : PieceTable :=
       · apply Nat.min_le_right
 
     let pieces := splitChunks 0 #[]
-    let tree := PieceTree.fromPieces pieces
+    let tmpPt : PieceTable := { original := bytes, addBuffers := #[], tree := PieceTree.empty, undoStack := [], redoStack := [], undoStackCount := 0, redoStackCount := 0, undoLimit := 100, lastInsert := none }
+    let tree := PieceTree.fromPieces pieces tmpPt
     { original := bytes, addBuffers := #[], tree := tree, undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
 
 /-- Construct from initial string -/
@@ -54,8 +55,8 @@ def PieceTable.insert (pt : PieceTable) (offset : Nat) (text : String) (cursorOf
   else
     let (pt', newPieces) := PieceTableHelper.appendText pt text
     let (l, r) := PieceTree.split pt.tree offset pt'
-    let mid := PieceTree.fromPieces newPieces
-    let newTree := PieceTree.concat (PieceTree.concat l mid) r
+    let mid := PieceTree.fromPieces newPieces pt'
+    let newTree := PieceTree.concat (PieceTree.concat l mid pt') r pt'
 
     -- Check optimization/merge compatibility
     let (finalUndoStack, newUndoCount, newLastInsert) :=
@@ -108,6 +109,55 @@ def PieceTable.delete (pt : PieceTable) (offset : Nat) (length : Nat) (cursorOff
       redoStackCount := 0
       lastInsert := none -- Break merge chain
     }
+
+/-- Insert text without touching undo/redo stacks (internal for bulk edits). -/
+def PieceTable.insertRaw (pt : PieceTable) (offset : Nat) (text : String) : PieceTable :=
+  if text.isEmpty then pt
+  else
+    let (pt', newPieces) := PieceTableHelper.appendText pt text
+    let (l, r) := PieceTree.split pt.tree offset pt'
+    let mid := PieceTree.fromPieces newPieces pt'
+    let newTree := PieceTree.concat (PieceTree.concat l mid pt') r pt'
+    { pt' with tree := newTree, lastInsert := none }
+
+/-- Delete a range without touching undo/redo stacks (internal for bulk edits). -/
+def PieceTable.deleteRaw (pt : PieceTable) (offset : Nat) (length : Nat) : PieceTable :=
+  if length == 0 then pt
+  else
+    let newTree := PieceTree.delete pt.tree offset length pt
+    { pt with tree := newTree, lastInsert := none }
+
+/-- Apply a list of replacements as a single undoable edit. -/
+def PieceTable.applyReplacements (pt : PieceTable) (cursorOffset : Nat) (replacements : Array (Nat × Nat)) (newText : String) : PieceTable :=
+  if replacements.isEmpty then
+    pt
+  else
+    let oldTree := pt.tree
+    let pt' := Id.run do
+      let mut acc := pt
+      for (startOff, endOff) in replacements.reverse do
+        let len := endOff - startOff
+        acc := acc.deleteRaw startOff len
+        acc := acc.insertRaw startOff newText
+      return acc
+    let stack := (oldTree, cursorOffset) :: pt'.undoStack
+    let newCount := pt'.undoStackCount + 1
+    let (finalStack, finalCount) :=
+      if newCount > pt'.undoLimit then
+        (stack.take pt'.undoLimit, pt'.undoLimit)
+      else
+        (stack, newCount)
+    { pt' with
+      undoStack := finalStack
+      undoStackCount := finalCount
+      redoStack := []
+      redoStackCount := 0
+      lastInsert := none
+    }
+
+/-- Apply deletions as a single undoable edit. -/
+def PieceTable.applyDeletions (pt : PieceTable) (cursorOffset : Nat) (ranges : Array (Nat × Nat)) : PieceTable :=
+  PieceTable.applyReplacements pt cursorOffset ranges ""
 
 /-- Commit the current edit group, forcing the next insert to start a new undo item. -/
 def PieceTable.commit (pt : PieceTable) : PieceTable :=

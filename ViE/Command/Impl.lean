@@ -56,6 +56,35 @@ def cmdSet (args : List String) (state : EditorState) : IO EditorState :=
   | ["nonumber"] => return { state with config := { state.config with showLineNumbers := false }, message := "number unset" }
   | _ => return { state with message := s!"Unknown setting or args: {args}" }
 
+def cmdBloom (args : List String) (state : EditorState) : IO EditorState := do
+  let (direction, pattern) :=
+    match args with
+    | [] => (SearchDirection.forward, "")
+    | [p] =>
+        if p.startsWith "/" then
+          (SearchDirection.forward, (p.drop 1).toString)
+        else if p.startsWith "?" then
+          (SearchDirection.backward, (p.drop 1).toString)
+        else
+          (SearchDirection.forward, p)
+    | p :: rest =>
+        let full := String.intercalate " " (p :: rest)
+        if full.startsWith "/" then
+          (SearchDirection.forward, (full.drop 1).toString)
+        else if full.startsWith "?" then
+          (SearchDirection.backward, (full.drop 1).toString)
+        else
+          (SearchDirection.forward, full)
+  if pattern.isEmpty then
+    return { state with message := "Empty search pattern" }
+  else
+    let s' := ViE.startOrUpdateSearch state pattern direction true
+    let s'' := ViE.findNextMatch s' (some direction)
+    return s''
+
+def cmdNoHighlight (_ : List String) (state : EditorState) : IO EditorState :=
+  return { state with searchState := none, message := "search highlight cleared" }
+
 def cmdWincmd (args : List String) (state : EditorState) : IO EditorState :=
   match args with
   | ["w"] => return ViE.Window.cycleWindow state
@@ -367,7 +396,10 @@ def defaultCommandMap : CommandMap := [
   ("u", cmdUndo),
   ("redo", cmdRedo),
   ("reload", cmdReload),
-  ("refresh", cmdReload)
+  ("refresh", cmdReload),
+  ("bloom", cmdBloom),
+  ("nohl", cmdNoHighlight),
+  ("noh", cmdNoHighlight)
 ]
 
 end ViE.Command

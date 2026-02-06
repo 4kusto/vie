@@ -30,7 +30,7 @@ def isWide (c : Nat) : Bool :=
   else
   let ranges := if c <= 0xFFFF then wideRangesBmp else wideRangesSupplemental
   let rec loop (lo hi : Nat) : Bool :=
-    if h : lo < hi then
+    if lo < hi then
       let mid := (lo + hi) / 2
       let (start, stop) := ranges[mid]!
       if c < start then
@@ -172,7 +172,7 @@ def displayColToByteOffsetFromIndex (idx : Array (Nat × Nat)) (col : Nat) : Nat
     0
   else
     let rec loop (lo hi : Nat) (best : Nat) : Nat :=
-      if h : lo < hi then
+      if lo < hi then
         let mid := (lo + hi) / 2
         let (disp, bytes) := idx[mid]!
         if col < disp then

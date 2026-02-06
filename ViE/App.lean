@@ -56,6 +56,7 @@ partial def loop (config : Config) (state : EditorState) : IO Unit := do
   | none =>
     -- Check for timeout
     let (stateAfterTimeout, keys) := ViE.checkTimeout state currentTime
+    let stateAfterTimeout := ViE.maybeRunIncrementalSearch stateAfterTimeout currentTime
     if keys.isEmpty then
        -- No input and no timeout events, sleep briefly to avoid busy loop
        IO.sleep 10 -- 10ms

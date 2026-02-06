@@ -82,7 +82,7 @@ def getPreviewWorkspace (state : EditorState) (explorer : ExplorerState) : Works
   | some idx =>
     if idx >= 2 then
       let real := idx - 2
-      if h : real < wg.workspaces.size then
+      if real < wg.workspaces.size then
         wg.workspaces[real]!
       else
         state.getCurrentWorkspace
@@ -95,7 +95,7 @@ def getPreviewWorkgroup (state : EditorState) (explorer : ExplorerState) : Workg
   | some idx =>
     if idx >= 2 then
       let real := idx - 2
-      if h : real < state.workgroups.size then
+      if real < state.workgroups.size then
         state.workgroups[real]!
       else
         state.getCurrentWorkgroup

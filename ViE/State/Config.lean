@@ -22,6 +22,11 @@ def defaultConfig : EditorConfig := {
   resetStyle := ViE.Color.reset
   fileIcon := "📄 "
   dirIcon := "📁 "
+  searchHighlightStyle := (ViE.Color.toBg .white) ++ (ViE.Color.toFg .black)
+  searchHighlightCursorStyle := (ViE.Color.toBg .yellow) ++ (ViE.Color.toFg .black)
+  searchBloomEnabled := false
+  searchBloomMinBytes := 64 * 1024 * 1024
+  searchBloomCacheMax := 1024
 }
 
 def initialInputState : InputState := {
@@ -30,6 +35,9 @@ def initialInputState : InputState := {
   commandBuffer := ""
   pendingKeys := ""
   lastInputTime := 0
+  lastSearchInputTime := 0
+  lastSearchRunTime := 0
+  pendingSearch := false
 }
 
 
@@ -96,6 +104,7 @@ def initialState : EditorState := {
   clipboard := none
   selectionStart := none
   explorers := []
+  searchState := none
   inputState := initialInputState
   windowHeight := 0
   windowWidth := 0

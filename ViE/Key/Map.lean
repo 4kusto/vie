@@ -71,6 +71,30 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
       let s' := EditorState.moveToLineEnd s
       pure $ s'.setMode Mode.insert
   | Key.char ':' => pure $ s.setMode Mode.command
+  | Key.char '/' =>
+      pure {
+        s with
+          mode := Mode.searchForward
+          inputState := {
+            s.inputState with
+              commandBuffer := ""
+              countBuffer := ""
+              previousKey := none
+              pendingSearch := false
+          }
+      }
+  | Key.char '?' =>
+      pure {
+        s with
+          mode := Mode.searchBackward
+          inputState := {
+            s.inputState with
+              commandBuffer := ""
+              countBuffer := ""
+              previousKey := none
+              pendingSearch := false
+          }
+      }
   | Key.char 'q' => pure $ s.setMode Mode.command
   | Key.char 'o' => pure $ (EditorState.insertLineBelow s).setMode Mode.insert
   | Key.char 'O' => pure $ (EditorState.insertLineAbove s).setMode Mode.insert
@@ -89,6 +113,14 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
   | Key.char 'b' => handleMotion s EditorState.moveWordBackward
   | Key.char 'e' => handleMotion s EditorState.moveWordEnd
   | Key.char 'x' => pure $ clearInput (EditorState.deleteCharAfterCursor s)
+  | Key.char 'n' => pure $ clearInput (ViE.findNextMatch s)
+  | Key.char 'N' =>
+      let overrideDir :=
+        match s.searchState with
+        | some st =>
+            if st.direction == .forward then some SearchDirection.backward else some SearchDirection.forward
+        | none => none
+      pure $ clearInput (ViE.findNextMatch s overrideDir)
   | Key.char 'p' =>
       let buf := s.getActiveBuffer
       let isExplorer := s.explorers.any (fun (id, _) => id == buf.id)

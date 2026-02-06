@@ -20,7 +20,7 @@ def EditorState.getCurrentWorkspace (s : EditorState) : WorkspaceState :=
 /-- Update current workspace within the active workgroup -/
 def EditorState.updateCurrentWorkspace (s : EditorState) (f : WorkspaceState → WorkspaceState) : EditorState :=
   s.updateCurrentWorkgroup fun wg =>
-    if h : wg.currentWorkspace < wg.workspaces.size then
+    if wg.currentWorkspace < wg.workspaces.size then
       let ws := wg.workspaces[wg.currentWorkspace]!
       let updated := f ws
       { wg with workspaces := wg.workspaces.set! wg.currentWorkspace updated }

@@ -74,13 +74,39 @@ def EditorState.getSelectedText (s : EditorState) : String :=
 
 def EditorState.yankSelection (s : EditorState) : EditorState :=
   let text := s.getSelectedText
-  { s.exitVisualMode with clipboard := some text, message := s!"Yanked selection" }
+  let reg : Register :=
+    if s.mode == .visualBlock then
+      let lines := if text.isEmpty then [] else text.splitOn "\n"
+      let width := lines.foldl (fun m l => max m (ViE.Unicode.stringWidth l)) 0
+      {
+        kind := .blockwise
+        text := text
+        blockLines := lines
+        blockWidth := width
+      }
+    else
+      {
+        kind := .charwise
+        text := text
+        blockLines := []
+        blockWidth := 0
+      }
+  { s.exitVisualMode with clipboard := some reg, message := s!"Yanked selection" }
 
 def EditorState.deleteSelection (s : EditorState) : EditorState :=
   match s.selectionStart with
   | none => s
   | some startPt =>
     if s.mode == .visualBlock then
+      let text := s.getSelectedText
+      let lines := if text.isEmpty then [] else text.splitOn "\n"
+      let width := lines.foldl (fun m l => max m (ViE.Unicode.stringWidth l)) 0
+      let reg : Register := {
+        kind := .blockwise
+        text := text
+        blockLines := lines
+        blockWidth := width
+      }
       let cursor := s.getCursor
       let minRow := (min startPt.row cursor.row).val
       let maxRow := (max startPt.row cursor.row).val
@@ -100,8 +126,15 @@ def EditorState.deleteSelection (s : EditorState) : EditorState :=
               { buffer with table := buffer.table.delete start len start, dirty := true }
             else buffer
           | none => buffer
-      s'.exitVisualMode |>.setCursor { row := ⟨minRow⟩, col := ⟨minCol⟩ }
+      { s'.exitVisualMode with clipboard := some reg } |>.setCursor { row := ⟨minRow⟩, col := ⟨minCol⟩ }
     else
+      let text := s.getSelectedText
+      let reg : Register := {
+        kind := .charwise
+        text := text
+        blockLines := []
+        blockWidth := 0
+      }
       let (p1, p2) := normalizeRange startPt s.getCursor
       let s' := s.updateActiveBuffer fun buffer =>
         let startOff := ViE.getOffsetFromPointInBuffer buffer p1.row.val p1.col.val |>.getD 0
@@ -112,6 +145,6 @@ def EditorState.deleteSelection (s : EditorState) : EditorState :=
           p2.col.val
         let endOff := ViE.getOffsetFromPointInBuffer buffer p2.row.val endCol |>.getD buffer.table.tree.length
         { buffer with table := buffer.table.delete startOff (endOff - startOff) startOff, dirty := true }
-      s'.exitVisualMode |>.setCursor p1
+      { s'.exitVisualMode with clipboard := some reg } |>.setCursor p1
 
 end ViE

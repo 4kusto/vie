@@ -6,6 +6,43 @@ import ViE.Color
 
 namespace ViE.UI
 open ViE
+/-- Find all occurrences of a byte pattern within a byte array. -/
+partial def findAllMatchesBytes (haystack : ByteArray) (needle : ByteArray) : Array (Nat × Nat) :=
+  let n := needle.size
+  let h := haystack.size
+  if n == 0 || h < n then
+    #[]
+  else
+    let rec matchesAt (i j : Nat) : Bool :=
+      if j == n then true
+      else if haystack[i + j]! == needle[j]! then matchesAt i (j + 1) else false
+    let rec loop (i : Nat) (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
+      if i + n > h then acc
+      else
+        let acc' := if matchesAt i 0 then acc.push (i, i + n) else acc
+        loop (i + 1) acc'
+    loop 0 #[]
+
+def updateSearchLineCache (st : EditorState) (lineIdx : Row) (lineStr : String) (matchRanges : Array (Nat × Nat)) : EditorState :=
+  match st.searchState with
+  | none => st
+  | some ss =>
+      let lineMatches := ss.lineMatches.insert lineIdx (lineStr, matchRanges)
+      let order :=
+        if ss.lineOrder.contains lineIdx then
+          ss.lineOrder
+        else
+          ss.lineOrder.push lineIdx
+      let (lineMatches, order) :=
+        if order.size > ss.lineCacheMax then
+          let dropCount := order.size - ss.lineCacheMax
+          let evicted := order.extract 0 dropCount
+          let order := order.extract dropCount order.size
+          let lineMatches := evicted.foldl (fun acc r => acc.erase r) lineMatches
+          (lineMatches, order)
+        else
+          (lineMatches, order)
+      { st with searchState := some { ss with lineMatches := lineMatches, lineOrder := order } }
 /-- Pad a string on the left with spaces until it reaches the given width. -/
 def leftPad (s : String) (width : Nat) : String :=
   if s.length >= width then s
@@ -34,10 +71,49 @@ def render (state : EditorState) : IO EditorState := do
   let rec renderLayout (l : Layout) (st : EditorState) (r c h w : Nat) : (Array String × EditorState) := Id.run do
     match l with
     | Layout.window id view =>
+      let prefetchSearchMatches (st : EditorState) (buf : FileBuffer) (startRow endRow : Nat) : EditorState :=
+        match st.searchState with
+        | none => st
+        | some ss =>
+            if ss.pattern.isEmpty then
+              st
+            else
+              let totalLines := FileBuffer.lineCount buf
+              let rec loop (row : Nat) (acc : EditorState) : EditorState :=
+                if row >= endRow then
+                  acc
+                else if row >= totalLines then
+                  acc
+                else
+                  let lineIdx : Row := ⟨row⟩
+                  let lineStr := getLineFromBuffer buf lineIdx |>.getD ""
+                  match acc.searchState with
+                  | none => acc
+                  | some ss2 =>
+                      match ss2.lineMatches.find? lineIdx with
+                      | some (cachedLine, _) =>
+                          if cachedLine == lineStr then
+                            loop (row + 1) acc
+                          else
+                            let matchRanges := findAllMatchesBytes lineStr.toUTF8 ss2.pattern.toUTF8
+                            let acc' := updateSearchLineCache acc lineIdx lineStr matchRanges
+                            loop (row + 1) acc'
+                      | none =>
+                          let matchRanges := findAllMatchesBytes lineStr.toUTF8 ss2.pattern.toUTF8
+                          let acc' := updateSearchLineCache acc lineIdx lineStr matchRanges
+                          loop (row + 1) acc'
+              loop startRow st
+
       let workH := if h > 0 then h - 1 else 0
       let buf := getBuffer st view.bufferId
       let mut currentSt := st
       let mut winBuf : Array String := #[]
+
+      let prefetchMargin := 20
+      let totalLines := FileBuffer.lineCount buf
+      let startRow := if view.scrollRow.val > prefetchMargin then view.scrollRow.val - prefetchMargin else 0
+      let endRow := min totalLines (view.scrollRow.val + workH + prefetchMargin)
+      currentSt := prefetchSearchMatches currentSt buf startRow endRow
 
       for i in [0:workH] do
         let lineIdx : Row := ⟨view.scrollRow.val + i⟩
@@ -54,6 +130,8 @@ def render (state : EditorState) : IO EditorState := do
            let cachedLine := buf.cache.find lineIdx
            let cachedRaw := buf.cache.findRaw lineIdx
            let cachedIdx := buf.cache.findIndex lineIdx
+           let lineStr := cachedRaw.getD (getLineFromBuffer buf lineIdx |>.getD "")
+           let lineIndex := cachedIdx.getD (ViE.Unicode.buildDisplayByteIndex lineStr)
            let (displayLine, nextSt) := match cachedLine with
              | some (s, cachedScrollCol, cachedWidth) =>
                if cachedScrollCol == view.scrollCol.val && cachedWidth == availableWidth then
@@ -65,7 +143,7 @@ def render (state : EditorState) : IO EditorState := do
                    let sub := ViE.Unicode.dropByDisplayWidth lineStr.toRawSubstring view.scrollCol.val
                    let dl := takeVisual sub availableWidth
                    let cache := match cachedRaw, cachedIdx with
-                     | some raw, some idx =>
+                     | some raw, some _ =>
                        if raw == lineStr then
                          buf.cache
                        else
@@ -83,7 +161,7 @@ def render (state : EditorState) : IO EditorState := do
                  let sub := ViE.Unicode.dropByDisplayWidth lineStr.toRawSubstring view.scrollCol.val
                  let dl := takeVisual sub availableWidth
                  let cache := match cachedRaw, cachedIdx with
-                   | some raw, some idx =>
+                   | some raw, some _ =>
                      if raw == lineStr then
                        buf.cache
                      else
@@ -104,24 +182,66 @@ def render (state : EditorState) : IO EditorState := do
 
            let isVisual := st.mode == Mode.visual || st.mode == Mode.visualBlock
            let selRange := if isVisual then st.selectionStart else none
+           let (searchMatches, searchSt) :=
+             match st.searchState with
+             | some ss =>
+                if ss.pattern.isEmpty then
+                  (#[], currentSt)
+                else
+                  match ss.lineMatches.find? lineIdx with
+                  | some (cachedLine, cachedMatches) =>
+                      if cachedLine == lineStr then
+                        (cachedMatches, currentSt)
+                      else
+                        let matchRanges := findAllMatchesBytes lineStr.toUTF8 ss.pattern.toUTF8
+                        let st' := updateSearchLineCache currentSt lineIdx lineStr matchRanges
+                        (matchRanges, st')
+                  | none =>
+                      let matchRanges := findAllMatchesBytes lineStr.toUTF8 ss.pattern.toUTF8
+                      let st' := updateSearchLineCache currentSt lineIdx lineStr matchRanges
+                      (matchRanges, st')
+             | none => (#[], currentSt)
+           currentSt := searchSt
 
-           match selRange with
-           | none => winBuf := winBuf.push displayLine
-           | some _ =>
+           let needsStyled := selRange.isSome || !searchMatches.isEmpty
+           if !needsStyled then
+             winBuf := winBuf.push displayLine
+           else
              let mut styleActive := false
              let chars := displayLine.toList
              let mut dispIdx := 0
+             let cursorByte :=
+               if lineIdx == view.cursor.row then
+                 some (ViE.Unicode.displayColToByteOffsetFromIndex lineIndex view.cursor.col.val)
+               else
+                 none
              for ch in chars do
                 let w := Unicode.charWidth ch
                 let colVal := view.scrollCol.val + dispIdx
+                let byteStart := ViE.Unicode.displayColToByteOffsetFromIndex lineIndex colVal
+                let byteEnd := ViE.Unicode.displayColToByteOffsetFromIndex lineIndex (colVal + w)
                 let isSelected :=
                   st.isInSelection lineIdx ⟨colVal⟩ ||
                   (w > 1 && st.isInSelection lineIdx ⟨colVal + 1⟩)
+                let isMatched :=
+                  searchMatches.any (fun (s, e) => byteStart < e && byteEnd > s)
+                let isCursorMatch :=
+                  match cursorByte with
+                  | some cb => searchMatches.any (fun (s, e) => s <= cb && cb < e)
+                  | none => false
 
-                if isSelected && !styleActive then
-                  winBuf := winBuf.push "\x1b[7m" -- Inverse video
-                  styleActive := true
-                else if !isSelected && styleActive then
+                if isSelected then
+                  if !styleActive then
+                    winBuf := winBuf.push "\x1b[7m" -- Inverse video
+                    styleActive := true
+                else if isMatched then
+                  if !styleActive then
+                    if isCursorMatch then
+                      winBuf := winBuf.push st.config.searchHighlightCursorStyle
+                    else
+                      winBuf := winBuf.push st.config.searchHighlightStyle
+                    styleActive := true
+                else if styleActive then
                   winBuf := winBuf.push "\x1b[0m"
                   styleActive := false
 
@@ -188,6 +308,8 @@ def render (state : EditorState) : IO EditorState := do
   buffer := buffer.push (Terminal.moveCursorStr (rows - 1) 0)
   let statusRight :=
     if state.mode == .command then s!":{state.inputState.commandBuffer}"
+    else if state.mode == .searchForward then s!"/{state.inputState.commandBuffer}"
+    else if state.mode == .searchBackward then s!"?{state.inputState.commandBuffer}"
     else state.message
   buffer := buffer.push statusRight
   buffer := buffer.push Terminal.clearLineStr
@@ -227,6 +349,8 @@ def render (state : EditorState) : IO EditorState := do
   )
 
   if state.mode == .command then
+     buffer := buffer.push (Terminal.moveCursorStr (rows - 1) (1 + state.inputState.commandBuffer.length))
+  if state.mode == .searchForward || state.mode == .searchBackward then
      buffer := buffer.push (Terminal.moveCursorStr (rows - 1) (1 + state.inputState.commandBuffer.length))
 
   if state.mode == .visual || state.mode == .visualBlock then

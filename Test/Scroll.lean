@@ -15,7 +15,6 @@ def assert (msg : String) (cond : Bool) : IO Unit := do
     throw (IO.userError s!"Assertion failed: {msg}")
 
 def test : IO Unit := do
-  let config := ViE.defaultConfig
   let state := ViE.initialState
   -- Set window size (e.g., 10 lines)
   let state := { state with windowHeight := 10, windowWidth := 80 }
