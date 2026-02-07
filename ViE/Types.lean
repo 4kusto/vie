@@ -128,6 +128,7 @@ structure EditorConfig where
   searchBloomEnabled : Bool
   searchBloomMinBytes : Nat
   searchBloomCacheMax : Nat
+  searchBloomBuildLeafBits : Bool
   historyLimit : Nat := 100
   deriving Inhabited
 
@@ -232,6 +233,11 @@ def initialFileBuffer : FileBuffer := {
 namespace FileBuffer
   def lineCount (buf : FileBuffer) : Nat :=
     buf.table.lineCount
+
+  def recomputeMissingEol (buf : FileBuffer) : FileBuffer :=
+    let len := buf.table.length
+    let missing := if len == 0 then false else !buf.table.endsWithNewline
+    { buf with missingEol := missing }
 
   def clearCache (buf : FileBuffer) : FileBuffer :=
     { buf with cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty } }

@@ -49,6 +49,17 @@ def test : IO Unit := do
   else
      IO.println "[PASS] Undo cursor correct"
 
+  -- Scenario: Wide character insert moves cursor by display width
+  let s := ViE.initialState
+  let wide := Char.ofNat 0x3042 -- Hiragana A (wide)
+  let s := s.insertChar wide
+  let cursor := s.getCursor
+  if cursor.col.val != 2 then
+     IO.println s!"[FAIL] Wide char cursor mismatch. Expected 2, got {cursor.col.val}"
+     assert "Wide char cursor" false
+  else
+     IO.println "[PASS] Wide char cursor correct"
+
   let s4 := s3.insertChar 'c'
   -- Text: 'ac'
   let text := getLineFromBuffer s4.getActiveBuffer 0 |>.getD ""

@@ -111,12 +111,12 @@ def start (config : Config) (args : List String) : IO Unit := do
 
   -- Load buffer if file exists
   let initialBuffer ← match actualFilename with
-    | some fname => loadBufferByteArray fname
+    | some fname => loadBufferByteArrayWithConfig fname config.settings
     | none => pure {
         id := 0
         filename := actualFilename
         dirty := false
-        table := PieceTable.fromString ""
+        table := PieceTable.fromString "" config.settings.searchBloomBuildLeafBits
         missingEol := false
         cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
       }

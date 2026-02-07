@@ -14,6 +14,8 @@ import Test.PieceTable.Basic
 import Test.PieceTable.UndoRedo
 import Test.PieceTable.Appended
 import Test.PieceTable.Stress
+import Test.PieceTable.Search
+import Test.MissingEol
 import Test.Scroll
 
 def test : IO Unit := do
@@ -35,6 +37,8 @@ def test : IO Unit := do
   Test.PieceTable.UndoRedo.test
   Test.PieceTable.Appended.test
   Test.PieceTable.Stress.test
+  Test.PieceTable.Search.test
+  Test.MissingEol.test
   IO.println "All tests finished."
 
 def main : IO Unit := do

@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Roles:
+#   - perf_profile.sh: full perf/c2c profiling for the bench binary.
+#   - perf_bench_bin.sh: perf profiling of bench binary (no lake exec overhead).
+#   - perf_bench_lake.sh: perf profiling via lake exe (includes lake overhead).
+
+set -euo pipefail
+
 # Configuration
 ITERATIONS=${1:-10000}
 OUTPUT_DIR=".lake/build/bin"
@@ -16,6 +23,9 @@ PERF_DATA="${DATE_DIR}/perf-${RUN_LABEL}.data"
 PERF_REPORT="${REPORT_DIR}/perf-${RUN_LABEL}.log"
 PERF_FOLDED="${FLAME_DIR}/perf-${RUN_LABEL}.folded"
 FLAMEGRAPH_SVG="${FLAME_DIR}/flamegraph-${RUN_LABEL}.svg"
+FLAMEGRAPH_DIR="${FLAMEGRAPH_DIR:-$HOME/.local/bin/FlameGraph}"
+STACKCOLLAPSE_BIN="${STACKCOLLAPSE_BIN:-${FLAMEGRAPH_DIR}/stackcollapse-perf.pl}"
+FLAMEGRAPH_BIN="${FLAMEGRAPH_BIN:-${FLAMEGRAPH_DIR}/flamegraph.pl}"
 
 # Mode: perf | c2c | both
 PERF_MODE="${PERF_MODE:-perf}"
@@ -61,12 +71,19 @@ if [ "$PERF_MODE" = "perf" ] || [ "$PERF_MODE" = "both" ]; then
         echo "Writing report to ${PERF_REPORT}"
         perf report -i "$PERF_DATA" --stdio > "$PERF_REPORT"
 
-        if command -v stackcollapse-perf.pl &> /dev/null && command -v flamegraph.pl &> /dev/null; then
+        if { [ -x "${STACKCOLLAPSE_BIN}" ] && [ -x "${FLAMEGRAPH_BIN}" ]; } || \
+           { command -v stackcollapse-perf.pl &> /dev/null && command -v flamegraph.pl &> /dev/null; }; then
             echo "Generating flamegraph..."
-            perf script -i "$PERF_DATA" | stackcollapse-perf.pl > "$PERF_FOLDED"
-            flamegraph.pl "$PERF_FOLDED" > "$FLAMEGRAPH_SVG"
+            if [ -x "${STACKCOLLAPSE_BIN}" ] && [ -x "${FLAMEGRAPH_BIN}" ]; then
+                perf script -i "$PERF_DATA" | "${STACKCOLLAPSE_BIN}" > "$PERF_FOLDED"
+                "${FLAMEGRAPH_BIN}" "$PERF_FOLDED" > "$FLAMEGRAPH_SVG"
+            else
+                perf script -i "$PERF_DATA" | stackcollapse-perf.pl > "$PERF_FOLDED"
+                flamegraph.pl "$PERF_FOLDED" > "$FLAMEGRAPH_SVG"
+            fi
         else
             echo "Flamegraph tools not found. Skipping flamegraph generation."
+            echo "Expected in \$FLAMEGRAPH_DIR (default: ${FLAMEGRAPH_DIR})"
         fi
     else
         echo "Error: perf record failed. You might need to run: sudo sysctl -w kernel.perf_event_paranoid=-1"

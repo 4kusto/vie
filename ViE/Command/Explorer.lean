@@ -60,7 +60,8 @@ def buildWorkgroupPreviewLines (wg : WorkgroupState) : List String :=
 
 def ensurePreviewTextBuffer (state : EditorState) (explorer : ExplorerState) (title : String) (lines : List String) : (EditorState × Nat) :=
   let content : TextBuffer := if lines.isEmpty then #[#[]] else lines.toArray.map stringToLine
-  let buf := { ViE.Buffer.fileBufferFromTextBuffer 0 (some s!"preview://{title}") content with dirty := false }
+  let buildLeafBits := state.config.searchBloomBuildLeafBits
+  let buf := { ViE.Buffer.fileBufferFromTextBufferWithConfig 0 (some s!"preview://{title}") content buildLeafBits with dirty := false }
   match explorer.previewBufferId with
   | some pid =>
     let ws := state.getCurrentWorkspace
@@ -105,7 +106,7 @@ def getPreviewWorkgroup (state : EditorState) (explorer : ExplorerState) : Workg
 
 def ensurePreviewBuffer (state : EditorState) (explorer : ExplorerState) (entry : FileEntry) : IO (EditorState × Nat) := do
   let resolved := entry.path
-  let loaded ← ViE.loadPreviewBufferByteArray resolved previewMaxBytes
+  let loaded ← ViE.loadPreviewBufferByteArrayWithConfig resolved previewMaxBytes state.config
   let previewName := some s!"preview://{resolved}"
   let previewBuf := { loaded with filename := previewName, dirty := false }
 
@@ -181,14 +182,16 @@ def openExplorerDefaultPreview (state : EditorState) (bufId : Nat) (explorer : E
         | some entry =>
           if entry.isDirectory then
             let content : TextBuffer := #[#[]]
-            let buf := { ViE.Buffer.fileBufferFromTextBuffer 0 (some "preview://") content with dirty := false }
+            let buildLeafBits := s1.config.searchBloomBuildLeafBits
+            let buf := { ViE.Buffer.fileBufferFromTextBufferWithConfig 0 (some "preview://") content buildLeafBits with dirty := false }
             let (pid, s2) := ViE.Buffer.addBuffer s1 buf
             pure (s2, pid)
           else
             ensurePreviewBuffer s1 explorer entry
         | none =>
           let content : TextBuffer := #[#[]]
-          let buf := { ViE.Buffer.fileBufferFromTextBuffer 0 (some "preview://") content with dirty := false }
+          let buildLeafBits := s1.config.searchBloomBuildLeafBits
+          let buf := { ViE.Buffer.fileBufferFromTextBufferWithConfig 0 (some "preview://") content buildLeafBits with dirty := false }
           let (pid, s2) := ViE.Buffer.addBuffer s1 buf
           pure (s2, pid)
       | .workspaces =>

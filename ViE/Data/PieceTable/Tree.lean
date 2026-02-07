@@ -187,7 +187,7 @@ def addBoundaryTrigrams (bloom : ByteArray) (leftSuffix rightPrefix : Array UInt
   addTrigramsFromArray bloom combined
 
 def buildBloomForPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.SearchBloom := Id.run do
-  if !ViE.BloomBuildLeafBits then
+  if !pt.bloomBuildLeafBits then
     let prefixBytes := buildPrefixBytes pieces pt
     let suffixBytes := buildSuffixBytes pieces pt
     return { bits := ViE.SearchBloom.empty.bits, prefixBytes := prefixBytes, suffixBytes := suffixBytes }
@@ -693,7 +693,7 @@ partial def findLastPatternInBytes (haystack : ByteArray) (needle : ByteArray) :
 
 /-- Search forward for a byte pattern from a given offset -/
 partial def searchNext (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startOffset : Nat) (chunkSize : Nat)
-  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (cacheMax : Nat)
+  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (_cacheMax : Nat)
   : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
   if pattern.size == 0 then
     (none, cache, order)
@@ -724,6 +724,7 @@ partial def searchNext (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : Byte
         (loop startOffset, cache, order)
       else
         let hashes := patternTrigramHashes pattern
+        let overlap := pattern.size - 1
         let rec searchNode (node : ViE.PieceTree) (baseOffset : Nat)
           (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
           : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
@@ -732,49 +733,48 @@ partial def searchNext (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : Byte
           else
             match node with
             | ViE.PieceTree.empty => (none, cache, order)
-            | ViE.PieceTree.leaf _ _ _ =>
+            | ViE.PieceTree.leaf _ _ m =>
                 let relStart := if startOffset > baseOffset then startOffset - baseOffset else 0
                 let remain := length node - relStart
-                if remain < pattern.size then
+                let globalStart := baseOffset + relStart
+                let available := total - globalStart
+                let readLen := min (remain + overlap) available
+                if readLen < pattern.size then
                   (none, cache, order)
                 else
-                  match node with
-                  | ViE.PieceTree.leaf pieces _ m =>
-                      let (bits, cache, order) :=
-                        if bloomIsEmpty m.bits then
-                          leafBloomBitsWithCache pieces pt baseOffset cache order cacheMax
-                        else
-                          (m.bits, cache, order)
-                      if !bloomMayContain bits hashes then
-                        (none, cache, order)
-                      else
-                        let bytes := getBytes node relStart remain pt
-                        match findPatternInBytes bytes pattern 0 with
-                        | some idx => (some (baseOffset + relStart + idx), cache, order)
-                        | none => (none, cache, order)
-                  | _ => (none, cache, order)
-            | ViE.PieceTree.internal children _ _ =>
-                let rec loop (i : Nat) (offset : Nat)
-                  (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
-                  : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-                  if i >= children.size then
+                  let crossesBoundary := readLen > remain
+                  if !crossesBoundary && !bloomMayContain m.bits hashes then
                     (none, cache, order)
                   else
-                    let child := children[i]!
-                    let childLen := length child
-                    let childEnd := offset + childLen
-                    if childEnd <= startOffset then
-                      loop (i + 1) childEnd cache order
+                    let bytes := getBytes t globalStart readLen pt
+                    match findPatternInBytes bytes pattern 0 with
+                    | some idx => (some (globalStart + idx), cache, order)
+                    | none => (none, cache, order)
+            | ViE.PieceTree.internal children _ m =>
+                if !bloomMayContain m.bits hashes then
+                  (none, cache, order)
+                else
+                  let rec loop (i : Nat) (offset : Nat)
+                    (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
+                    : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
+                    if i >= children.size then
+                      (none, cache, order)
                     else
-                      match searchNode child offset cache order with
-                      | (some res, cache, order) => (some res, cache, order)
-                      | (none, cache, order) => loop (i + 1) childEnd cache order
-                loop 0 baseOffset cache order
+                      let child := children[i]!
+                      let childLen := length child
+                      let childEnd := offset + childLen
+                      if childEnd <= startOffset then
+                        loop (i + 1) childEnd cache order
+                      else
+                        match searchNode child offset cache order with
+                        | (some res, cache, order) => (some res, cache, order)
+                        | (none, cache, order) => loop (i + 1) childEnd cache order
+                  loop 0 baseOffset cache order
         searchNode t 0 cache order
 
 /-- Search backward for a byte pattern ending before startExclusive -/
 partial def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startExclusive : Nat) (chunkSize : Nat)
-  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (cacheMax : Nat)
+  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (_cacheMax : Nat)
   : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
   if pattern.size == 0 then
     (none, cache, order)
@@ -804,6 +804,7 @@ partial def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : Byte
       (loop end0, cache, order)
     else
       let hashes := patternTrigramHashes pattern
+      let overlap := pattern.size - 1
       let rec searchNode (node : ViE.PieceTree) (baseOffset : Nat)
         (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
         : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
@@ -812,50 +813,51 @@ partial def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : Byte
         else
           match node with
           | ViE.PieceTree.empty => (none, cache, order)
-          | ViE.PieceTree.leaf _ _ _ =>
+          | ViE.PieceTree.leaf _ _ m =>
               let relEnd := min (end0 - baseOffset) (length node)
-              if relEnd < pattern.size then
+              let globalEnd := baseOffset + relEnd
+              let globalStart := if baseOffset > overlap then baseOffset - overlap else 0
+              let readLen := globalEnd - globalStart
+              if readLen < pattern.size then
                 (none, cache, order)
               else
-                match node with
-                | ViE.PieceTree.leaf pieces _ m =>
-                    let (bits, cache, order) :=
-                      if bloomIsEmpty m.bits then
-                        leafBloomBitsWithCache pieces pt baseOffset cache order cacheMax
-                      else
-                        (m.bits, cache, order)
-                    if !bloomMayContain bits hashes then
-                      (none, cache, order)
-                    else
-                      let bytes := getBytes node 0 relEnd pt
-                      match findLastPatternInBytes bytes pattern with
-                      | some idx => (some (baseOffset + idx), cache, order)
-                      | none => (none, cache, order)
-                | _ => (none, cache, order)
-          | ViE.PieceTree.internal children _ _ =>
-              let spans : Array (ViE.PieceTree × Nat) := Id.run do
-                let mut acc : Array (ViE.PieceTree × Nat) := #[]
-                let mut offset := baseOffset
-                for child in children do
-                  acc := acc.push (child, offset)
-                  offset := offset + length child
-                return acc
-              let rec loop (i : Nat)
-                (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
-                : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-                if i >= spans.size then
+                let crossesBoundary := globalStart < baseOffset
+                if !crossesBoundary && !bloomMayContain m.bits hashes then
                   (none, cache, order)
                 else
-                  let j := spans.size - 1 - i
-                  let (child, childOffset) := spans[j]!
-                  if childOffset >= end0 then
-                    loop (i + 1) cache order
+                  let bytes := getBytes t globalStart readLen pt
+                  match findLastPatternInBytes bytes pattern with
+                  | some idx =>
+                      let pos := globalStart + idx
+                      if pos < end0 then (some pos, cache, order) else (none, cache, order)
+                  | none => (none, cache, order)
+          | ViE.PieceTree.internal children _ m =>
+              if !bloomMayContain m.bits hashes then
+                (none, cache, order)
+              else
+                let spans : Array (ViE.PieceTree × Nat) := Id.run do
+                  let mut acc : Array (ViE.PieceTree × Nat) := #[]
+                  let mut offset := baseOffset
+                  for child in children do
+                    acc := acc.push (child, offset)
+                    offset := offset + length child
+                  return acc
+                let rec loop (i : Nat)
+                  (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
+                  : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
+                  if i >= spans.size then
+                    (none, cache, order)
                   else
-                    match searchNode child childOffset cache order with
-                    | (some res, cache, order) =>
-                        if res < end0 then (some res, cache, order) else loop (i + 1) cache order
-                    | (none, cache, order) => loop (i + 1) cache order
-              loop 0 cache order
+                    let j := spans.size - 1 - i
+                    let (child, childOffset) := spans[j]!
+                    if childOffset >= end0 then
+                      loop (i + 1) cache order
+                    else
+                      match searchNode child childOffset cache order with
+                      | (some res, cache, order) =>
+                          if res < end0 then (some res, cache, order) else loop (i + 1) cache order
+                      | (none, cache, order) => loop (i + 1) cache order
+                loop 0 cache order
       searchNode t 0 cache order
 
 end PieceTree

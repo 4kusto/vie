@@ -48,8 +48,6 @@ def BloomBits : Nat := 4096
 /-- Bloom filter byte size. -/
 def BloomBytes : Nat := BloomBits / 8
 
-/-- Build full bloom bits for leaf nodes (startup cost). -/
-def BloomBuildLeafBits : Bool := false
 
 /-- Search metadata for a piece tree node. -/
 structure SearchBloom where
@@ -86,6 +84,7 @@ structure PieceTable where
   original : ByteArray
   addBuffers : Array ByteArray
   tree : PieceTree
+  bloomBuildLeafBits : Bool := true
   undoStack : List (PieceTree × Nat) := []
   redoStack : List (PieceTree × Nat) := []
   undoStackCount : Nat := 0

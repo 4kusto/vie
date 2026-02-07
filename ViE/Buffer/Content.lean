@@ -60,6 +60,19 @@ def fileBufferFromTextBuffer (id : Nat) (filename : Option String) (content : Te
     cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
   }
 
+/-- Create/Update FileBuffer from TextBuffer with bloom config. -/
+def fileBufferFromTextBufferWithConfig (id : Nat) (filename : Option String) (content : TextBuffer) (buildLeafBits : Bool) : FileBuffer :=
+  let fullString := String.intercalate "\n" (content.toList.map lineToString)
+  let table := PieceTable.fromString fullString buildLeafBits
+  {
+    id := id
+    filename := filename
+    dirty := true -- Assume dirty if created from manual content
+    table := table
+    missingEol := false -- Default
+    cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
+  }
+
 /-- Update FileBuffer from TextBuffer (compatibility function) -/
 def fileBufferUpdateFromTextBuffer (buf : FileBuffer) (newContent : TextBuffer) : FileBuffer :=
   let newBuf := fileBufferFromTextBuffer buf.id buf.filename newContent

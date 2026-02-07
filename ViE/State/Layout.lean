@@ -96,7 +96,11 @@ def EditorState.updateActiveBuffer (s : EditorState) (f : FileBuffer -> FileBuff
     let view := ws.layout.findView ws.activeWindowId
     match view with
     | some v =>
-      let newBuffers := ws.buffers.map fun b => if b.id == v.bufferId then FileBuffer.clearCache (f b) else b
+      let newBuffers := ws.buffers.map fun b =>
+        if b.id == v.bufferId then
+          let updated := FileBuffer.recomputeMissingEol (f b)
+          FileBuffer.clearCache updated
+        else b
       { ws with buffers := newBuffers }
     | none => ws
 

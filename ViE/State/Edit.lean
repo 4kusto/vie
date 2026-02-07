@@ -20,7 +20,8 @@ def EditorState.insertChar (s : EditorState) (c : Char) : EditorState :=
                                    dirty := true }
     | none => buffer
 
-  s'.setCursor { cursor with col := ⟨cursor.col.val + 1⟩ }
+  let delta := ViE.Unicode.charWidth c
+  s'.setCursor { cursor with col := ⟨cursor.col.val + delta⟩ }
 
 def EditorState.insertNewline (s : EditorState) : EditorState :=
   let cursor := s.getCursor

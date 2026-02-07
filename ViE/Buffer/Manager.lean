@@ -11,7 +11,8 @@ open ViE
 def createNewBuffer (state : EditorState) (content : TextBuffer) (filename : Option String) : (Nat × EditorState) :=
   let s' := state.updateCurrentWorkspace fun ws =>
     let id := ws.nextBufferId
-    let buf : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer id filename content
+    let buildLeafBits := state.config.searchBloomBuildLeafBits
+    let buf : FileBuffer := ViE.Buffer.fileBufferFromTextBufferWithConfig id filename content buildLeafBits
     { ws with buffers := buf :: ws.buffers, nextBufferId := id + 1 }
   let ws := s'.getCurrentWorkspace
   (ws.nextBufferId - 1, s')
@@ -42,7 +43,7 @@ def openBuffer (state : EditorState) (filename : String) : IO EditorState := do
     return { s' with message := s!"Switched to \"{filename}\"" }
   | none =>
     try
-      let loadedBuf ← ViE.loadBufferByteArray resolvedPath
+      let loadedBuf ← ViE.loadBufferByteArrayWithConfig resolvedPath state.config
       -- Assign new ID and add to workgroup
       let s' := state.updateCurrentWorkspace fun ws =>
         let id := ws.nextBufferId

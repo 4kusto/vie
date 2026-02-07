@@ -33,7 +33,7 @@ def saveBuffer (state : EditorState) (filename : String) : IO EditorState := do
     IO.FS.rename tempFilename filename
 
     -- After save, reload as clean mmap
-    let newBuffer ← loadBufferByteArray filename
+    let newBuffer ← loadBufferByteArrayWithConfig filename state.config
     let newBuffer := { newBuffer with id := buffer.id, dirty := false }
 
     -- Update the buffer in the current workgroup

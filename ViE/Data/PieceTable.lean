@@ -5,9 +5,10 @@ import ViE.Unicode
 namespace ViE
 
 /-- Construct from bytes -/
-def PieceTable.fromByteArray (bytes : ByteArray) : PieceTable :=
+def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) : PieceTable :=
   if bytes.size == 0 then
-    { original := bytes, addBuffers := #[], tree := PieceTree.empty, undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
+    { original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits,
+      undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
   else
     -- Split bytes into chunks to avoid monolithic pieces
     let totalSize := bytes.size
@@ -35,13 +36,17 @@ def PieceTable.fromByteArray (bytes : ByteArray) : PieceTable :=
       · apply Nat.min_le_right
 
     let pieces := splitChunks 0 #[]
-    let tmpPt : PieceTable := { original := bytes, addBuffers := #[], tree := PieceTree.empty, undoStack := [], redoStack := [], undoStackCount := 0, redoStackCount := 0, undoLimit := 100, lastInsert := none }
+    let tmpPt : PieceTable := {
+      original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits,
+      undoStack := [], redoStack := [], undoStackCount := 0, redoStackCount := 0, undoLimit := 100, lastInsert := none
+    }
     let tree := PieceTree.fromPieces pieces tmpPt
-    { original := bytes, addBuffers := #[], tree := tree, undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
+    { original := bytes, addBuffers := #[], tree := tree, bloomBuildLeafBits := buildLeafBits,
+      undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none }
 
 /-- Construct from initial string -/
-def PieceTable.fromString (s : String) : PieceTable :=
-  PieceTable.fromByteArray s.toUTF8
+def PieceTable.fromString (s : String) (buildLeafBits : Bool := true) : PieceTable :=
+  PieceTable.fromByteArray s.toUTF8 buildLeafBits
 
 /-- Convert tree to string -/
 def PieceTable.toString (pt : PieceTable) : String :=
