@@ -17,6 +17,8 @@ import Test.PieceTable.Stress
 import Test.PieceTable.Search
 import Test.MissingEol
 import Test.Scroll
+import Test.Checkpoint
+import Test.SearchHighlight
 
 def test : IO Unit := do
   IO.println "Running all tests..."
@@ -39,6 +41,8 @@ def test : IO Unit := do
   Test.PieceTable.Stress.test
   Test.PieceTable.Search.test
   Test.MissingEol.test
+  Test.Checkpoint.test
+  Test.SearchHighlight.test
   IO.println "All tests finished."
 
 def main : IO Unit := do

@@ -46,14 +46,18 @@ def loadSession : IO (Option (List String × Nat × List (Nat × Nat))) := do
       match lines with
       | [] => none
       | "--ACTIVE--" :: idxStr :: _ =>
-        let idx := idxStr.toNat!
-        some (accFiles.reverse, idx, accCursors.reverse)
+        match idxStr.toNat? with
+        | some idx => some (accFiles.reverse, idx, accCursors.reverse)
+        | none => none
       | fname :: coords :: rest =>
         let parts := coords.splitOn " "
         match parts with
         | [r, c] =>
-           let cursor := (r.toNat!, c.toNat!)
-           parseFiles rest (fname :: accFiles) (cursor :: accCursors)
+           match r.toNat?, c.toNat? with
+           | some row, some col =>
+              let cursor := (row, col)
+              parseFiles rest (fname :: accFiles) (cursor :: accCursors)
+           | _, _ => none
         | _ => none -- Parse error
       | _ => none
 

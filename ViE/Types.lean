@@ -125,8 +125,6 @@ structure EditorConfig where
   dirIcon : String
   searchHighlightStyle : String
   searchHighlightCursorStyle : String
-  searchBloomEnabled : Bool
-  searchBloomMinBytes : Nat
   searchBloomCacheMax : Nat
   searchBloomBuildLeafBits : Bool
   historyLimit : Nat := 100

@@ -531,7 +531,10 @@ def handleExplorerEnter (state : EditorState) : IO EditorState := do
   let explorerOpt := state.explorers.find? (fun (id, _) => id == buf.id)
 
   match explorerOpt with
-  | none => return state.insertNewline -- Not an explorer, normal behavior
+  | none =>
+    match state.searchState with
+    | some _ => return ViE.findNextMatch state
+    | none => return state.moveCursorDown
   | some (_, explorer) =>
     -- Get current cursor row
     let cursor := state.getCursor

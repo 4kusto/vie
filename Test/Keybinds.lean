@@ -256,6 +256,10 @@ def testSearch : IO Unit := do
   let s2 ← runKeys s1 ([Key.char '/'] ++ keys "hello" ++ [Key.enter])
   assertCursor "/hello finds first match" s2 0 0
 
+  let s2e ← runKeys s2 [Key.enter]
+  assertCursor "Enter after search jumps to next match" s2e 1 0
+  assertBuffer "Enter after search does not insert newline" s2e "hello world\nhello again\n"
+
   let s3 ← runKeys s2 [Key.char 'n']
   assertCursor "n finds next match" s3 1 0
 

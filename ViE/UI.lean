@@ -23,6 +23,26 @@ partial def findAllMatchesBytes (haystack : ByteArray) (needle : ByteArray) : Ar
         loop (i + 1) acc'
     loop 0 #[]
 
+def overlapsByteRange (r : Nat × Nat) (byteStart byteEnd : Nat) : Bool :=
+  let (s, e) := r
+  byteStart < e && byteEnd > s
+
+def activeMatchRange (hitRanges : Array (Nat × Nat)) (cursorByte : Option Nat) : Option (Nat × Nat) :=
+  match cursorByte with
+  | none => none
+  | some cb =>
+      let rec loop (i : Nat) : Option (Nat × Nat) :=
+        if i >= hitRanges.size then
+          none
+        else
+          let m := hitRanges[i]!
+          let (s, e) := m
+          if s <= cb && cb < e then
+            some m
+          else
+            loop (i + 1)
+      loop 0
+
 def updateSearchLineCache (st : EditorState) (lineIdx : Row) (lineStr : String) (matchRanges : Array (Nat × Nat)) : EditorState :=
   match st.searchState with
   | none => st
@@ -215,6 +235,7 @@ def render (state : EditorState) : IO EditorState := do
                  some (ViE.Unicode.displayColToByteOffsetFromIndex lineIndex view.cursor.col.val)
                else
                  none
+             let activeMatch := activeMatchRange searchMatches cursorByte
              for ch in chars do
                 let w := Unicode.charWidth ch
                 let colVal := view.scrollCol.val + dispIdx
@@ -224,10 +245,10 @@ def render (state : EditorState) : IO EditorState := do
                   st.isInSelection lineIdx ⟨colVal⟩ ||
                   (w > 1 && st.isInSelection lineIdx ⟨colVal + 1⟩)
                 let isMatched :=
-                  searchMatches.any (fun (s, e) => byteStart < e && byteEnd > s)
-                let isCursorMatch :=
-                  match cursorByte with
-                  | some cb => searchMatches.any (fun (s, e) => s <= cb && cb < e)
+                  searchMatches.any (fun m => overlapsByteRange m byteStart byteEnd)
+                let isActiveMatched :=
+                  match activeMatch with
+                  | some m => overlapsByteRange m byteStart byteEnd
                   | none => false
 
                 if isSelected then
@@ -236,7 +257,7 @@ def render (state : EditorState) : IO EditorState := do
                     styleActive := true
                 else if isMatched then
                   if !styleActive then
-                    if isCursorMatch then
+                    if isActiveMatched then
                       winBuf := winBuf.push st.config.searchHighlightCursorStyle
                     else
                       winBuf := winBuf.push st.config.searchHighlightStyle

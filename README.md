@@ -29,13 +29,15 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 ## Search
 - `/` forward search, `?` backward search
 - `n` / `N` jump to next/previous match
+- `Enter` in Normal mode jumps to next match when a search is active
+- `:noh` / `:nohl` clears current search highlight
 - Matches are highlighted (styles configurable)
 
 ## Bloom filter (search)
 - Optional bloom filter to skip non-matching piece-table nodes during search
 - Use `:bloom {pattern}` to search with bloom enabled
 - Direction: `:bloom /pattern` (forward), `:bloom ?pattern` (backward)
-- Tuning: `searchBloomMinBytes`, `searchBloomCacheMax`, `searchBloomBuildLeafBits`
+- Tuning: `searchBloomCacheMax`, `searchBloomBuildLeafBits`
 
 ## Keybindings
 
@@ -81,18 +83,48 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 - `Esc`: Return to Normal Mode
 
 ## Commands
+- `:e <file>`: Open file
 - `:w`: Save file
 - `:q`: Quit window
 - `:q!`: force quit
+- `:qa`, `:qa!`: force quit editor
 - `:wq`: Save and quit
 - `:set number`: Show line numbers
 - `:set nonumber`: Hide line numbers
-- `:vs`, `:hs`  vertical and horizontal window splitting
-- `:wincmd h/j/k/l` change focus select window
-- `:wh`, `:wj`, `:wk`, `:wl` change focus select window (alias)
-- `:wincmd w`, `:wc` cyclic selection
-- `:wg <n>` switch to workgroup <n>
+- `:sp`, `:split`, `:hs`, `:hsplit`: Horizontal split
+- `:vs`, `:vsplit`: Vertical split
+- `:wincmd h/j/k/l`: Switch focused window
+- `:wincmd s/v`: Split from `wincmd`
+- `:wincmd w`, `:wc`: Cycle focused window
+- `:wh`, `:wj`, `:wk`, `:wl`: Window focus aliases
+- `:cd [path]`: Set/Clear workspace root
+- `:pwd`: Show current workspace root
+- `:workspace open <path>`: Set workspace root
+- `:workspace rename <name>`: Rename current workspace
+- `:ws list`: Open workspace explorer
+- `:ws open [--name <name>] <path>`: Create and switch workspace
+- `:ws new [name] [path]`: Create and switch workspace
+- `:ws close`: Close current workspace
+- `:ws rename <name>`: Rename current workspace
+- `:ws next`, `:ws prev`, `:ws <index>`: Switch workspace
+- `:wg list`: Open workgroup explorer
+- `:wg new [name]`: Create and switch workgroup
+- `:wg close`: Close current workgroup
+- `:wg rename <name>`: Rename current workgroup
+- `:wg next`, `:wg prev`, `:wg <index>`: Switch workgroup
+- `:ee [path]`: Open file explorer
+- `:wgex`: Open workgroup explorer
+- `:undo`, `:u`: Undo
+- `:redo`: Redo
 - `:reload`: reload configuration
+- `:refresh`: alias for `:reload`
+- `:bloom /pattern`, `:bloom ?pattern`: Bloom-assisted search
+- `:noh`, `:nohl`: Clear search highlight
+- `:s/old/new/[g]`: Substitute on current line
+- `:%s/old/new/[g]`: Substitute on all lines
+- `:g/pat/ d`: Delete matching lines
+- `:g/pat/ s/old/new/[g]`: Substitute on matching lines
+- `:v/pat/ d`: Delete non-matching lines
 
 ### Shortcuts
 - `Alt + Shift + h/j/k/l`: resize focused select window
