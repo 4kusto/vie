@@ -23,6 +23,19 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 - Workgroups
 - Hot reload(recompile and reload) configuration 
   - place this source and Main.lean in '~/.config/editor/' and :reload
+- Search (WIP)
+- Optional bloom filter acceleration for search
+
+## Search
+- `/` forward search, `?` backward search
+- `n` / `N` jump to next/previous match
+- Matches are highlighted (styles configurable)
+
+## Bloom filter (search)
+- Optional bloom filter to skip non-matching piece-table nodes during search
+- Use `:bloom {pattern}` to search with bloom enabled
+- Direction: `:bloom /pattern` (forward), `:bloom ?pattern` (backward)
+- Tuning: `searchBloomMinBytes`, `searchBloomCacheMax`, `searchBloomBuildLeafBits`
 
 ## Keybindings
 
