@@ -232,11 +232,9 @@ def PieceTable.endsWithNewline (pt : PieceTable) : Bool :=
 
 def PieceTable.lineCount (pt : PieceTable) : Nat :=
   let breaks := PieceTree.lineBreaks pt.tree
-  if breaks == 0 then 1
-  -- If the file ends with a newline, Vim doesn't count it as a new empty line
-  -- unless it's preceded by another newline (e.g., "a\n\n" is 2 lines).
-  else if pt.endsWithNewline then breaks
-  else breaks + 1
+  -- In editor state, each newline creates a new line slot.
+  -- Keep lineCount consistent with getLineRange/getLine and cursor rows.
+  breaks + 1
 
 private def PieceTable.findLineForOffsetCore (pt : PieceTable) (target : Nat) (low high : Nat) (fuel : Nat) : Option (Nat × Nat) :=
   match fuel with
@@ -262,7 +260,8 @@ def PieceTable.findLineForOffset (pt : PieceTable) (target : Nat) (low high : Na
   PieceTable.findLineForOffsetCore pt target low high fuel
 
 def PieceTable.getPointFromOffset (pt : PieceTable) (offset : Nat) : (Nat × Nat) :=
-  match PieceTable.findLineForOffset pt offset 0 pt.lineCount with
+  let hi := pt.lineCount - 1
+  match PieceTable.findLineForOffset pt offset 0 hi with
   | some (r, c) =>
     match PieceTable.getLineRange pt r with
     | some (startOff, len) =>

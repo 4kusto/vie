@@ -96,6 +96,30 @@ def test : IO Unit := do
   else
      IO.println "[PASS] 'x' command works"
 
+  -- Scenario: Insert mode transition + single-char delete keeps line count and cursor in sync.
+  let s := ViE.initialState
+  let s ← runKeys s [Key.char 'i', Key.enter]
+  let c1 := s.getCursor
+  assert "Enter in insert creates second line" (s.getActiveBuffer.lineCount == 2)
+  assert "Enter in insert moves cursor to next line" (c1.row.val == 1 && c1.col.val == 0)
+
+  let s ← runKeys s [Key.esc]
+  let c2 := s.getCursor
+  assert "Esc from insert keeps valid cursor row" (c2.row.val < s.getActiveBuffer.lineCount)
+  assert "Esc from insert keeps row/col at second line head" (c2.row.val == 1 && c2.col.val == 0)
+
+  -- Re-enter insert and delete one char (the previous newline) via Backspace.
+  let s ← runKeys s [Key.char 'i', Key.backspace]
+  let c3 := s.getCursor
+  assert "Backspace at BOL joins lines" (s.getActiveBuffer.lineCount == 1)
+  assert "Backspace at BOL moves cursor to joined line end" (c3.row.val == 0 && c3.col.val == 0)
+
+  -- In normal mode x at empty line is a no-op and must keep cursor valid.
+  let s ← runKeys s [Key.esc, Key.char 'x']
+  let c4 := s.getCursor
+  assert "x on empty line keeps line count" (s.getActiveBuffer.lineCount == 1)
+  assert "x on empty line keeps cursor in range" (c4.row.val < s.getActiveBuffer.lineCount)
+
   IO.println "Cursor Reproduction Test Finished"
 
 end Test.CursorReproduction

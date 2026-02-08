@@ -20,6 +20,13 @@ def naiveDelete (s : String) (idx : Nat) (len : Nat) : String :=
   let post := lst.drop (idx + len)
   String.ofList (pre ++ post)
 
+def newlineCount (s : String) : Nat :=
+  s.foldl (fun n c => if c == '\n' then n + 1 else n) 0
+
+def expectedLineCountFromText (s : String) : Nat :=
+  let breaks := newlineCount s
+  breaks + 1
+
 def testConsistency : IO Unit := do
   IO.println "testConsistency (Small Stress)..."
   let mut pt := PieceTable.fromString ""
@@ -47,9 +54,41 @@ def testConsistency : IO Unit := do
   mirror := naiveInsert mirror 5 ","
   assertEqual "Step 4" mirror pt.toString
 
+def testLengthAndLineCountConsistency : IO Unit := do
+  IO.println "testLengthAndLineCountConsistency..."
+  let mut pt := PieceTable.fromString ""
+  for i in [0:1200] do
+    let len := pt.length
+    let pos := if len == 0 then 0 else (i * 17 + 3) % (len + 1)
+    if i % 5 == 0 then
+      let txt := if i % 2 == 0 then "\n" else s!"x{i}"
+      pt := pt.insert pos txt pos
+    else if i % 7 == 0 then
+      let delLen := if len == 0 then 0 else min ((i % 4) + 1) (len - (pos % len))
+      pt := pt.delete (if len == 0 then 0 else pos % len) delLen 0
+    else
+      let txt := if i % 3 == 0 then "a\n" else "b"
+      pt := pt.insert pos txt pos
+
+    let rendered := pt.toString
+    let renderedBytes := rendered.toUTF8.size
+    if renderedBytes != pt.length then
+      throw <| IO.userError s!"Length mismatch at step {i}: tree={pt.length} rendered={renderedBytes}"
+
+    let expectedLines := expectedLineCountFromText rendered
+    if pt.lineCount != expectedLines then
+      throw <| IO.userError s!"Line count mismatch at step {i}: tree={pt.lineCount} expected={expectedLines}"
+
+    let h := PieceTree.height pt.tree
+    if h > 64 then
+      throw <| IO.userError s!"Tree height unexpectedly large at step {i}: height={h}"
+
+  IO.println "[PASS] length/line count remain consistent under mixed edits"
+
 def test : IO Unit := do
   IO.println "Starting PieceTable Stress Test..."
   testConsistency
+  testLengthAndLineCountConsistency
   IO.println "PieceTable Stress Test passed!"
 
 end Test.PieceTable.Stress

@@ -312,10 +312,33 @@ def fromPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree 
       have hhalf : 0 < pieces.size / 2 := Nat.div_pos hge2 (by decide : 0 < 2)
       exact Nat.sub_lt hsize hhalf
 
+/-- Flatten a tree into pieces in document order (iterative to avoid deep recursion). -/
+def toPieces (t : ViE.PieceTree) : Array ViE.Piece := Id.run do
+  let mut out : Array ViE.Piece := #[]
+  let mut stack : List ViE.PieceTree := [t]
+  while !stack.isEmpty do
+    match stack with
+    | [] => pure ()
+    | node :: rest =>
+        stack := rest
+        match node with
+        | ViE.PieceTree.empty => pure ()
+        | ViE.PieceTree.leaf pieces _ _ =>
+            out := out ++ pieces
+        | ViE.PieceTree.internal children _ _ =>
+            let mut i := children.size
+            while i > 0 do
+              let j := i - 1
+              stack := children[j]! :: stack
+              i := j
+  return out
+
 /-- Concatenate two trees while maintaining B+ tree invariants. -/
 private def concatCore (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTable) (fuel : Nat) : ViE.PieceTree :=
   match fuel with
-  | 0 => mkInternal #[l, r]
+  | 0 =>
+    -- Rebuild into a balanced tree in pathological cases instead of creating deep chains.
+    fromPieces (toPieces l ++ toPieces r) pt
   | fuel + 1 =>
     match l, r with
     | ViE.PieceTree.empty, _ => r
@@ -415,7 +438,9 @@ private def concatCore (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTa
     all_goals exact Nat.lt_succ_self _
 
 def concat (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTable) : ViE.PieceTree :=
-  let fuel := (length l + length r + 1) * 4 + 16
+  -- Cap recursion depth and rely on balanced fallback when exhausted.
+  let rawFuel := (height l + height r + 4) * 8 + 64
+  let fuel := min rawFuel 2048
   concatCore l r pt fuel
 
 /-- Split the tree at a given byte offset. -/
@@ -460,7 +485,7 @@ private def splitCore (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) (
     all_goals exact Nat.lt_succ_self _
 
 def split (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) : (ViE.PieceTree × ViE.PieceTree) :=
-  let fuel := (length t + 1) * 4 + 16
+  let fuel := (height t + 4) * 32 + 64
   splitCore t offset pt fuel
 
 /-- Delete range from tree -/
@@ -519,7 +544,7 @@ private def getBytesCore (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : Vi
   chunks.foldl (fun (acc : ByteArray) (b : ByteArray) => acc ++ b) (ByteArray.mk #[])
 
 def getBytes (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : ByteArray :=
-  let fuel := (length t + len + 1) * 4 + 32
+  let fuel := (height t + 4) * 32 + 64
   getBytesCore t offset len pt fuel
 
 /-- Get substring from tree -/
@@ -579,7 +604,7 @@ private def findNthNewlineLeafCore (t : ViE.PieceTree) (n : Nat) (pt : ViE.Piece
     all_goals exact Nat.lt_succ_self _
 
 def findNthNewlineLeaf (t : ViE.PieceTree) (n : Nat) (pt : ViE.PieceTable) : Option (ViE.Piece × Nat × Nat) :=
-  let fuel := (length t + lineBreaks t + 1) * 4 + 16
+  let fuel := (height t + 4) * 32 + 64
   findNthNewlineLeafCore t n pt 0 fuel
 
 /-- Get range of a line in byte offsets -/
@@ -919,7 +944,7 @@ private def searchNextCore (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : 
 def searchNext (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startOffset : Nat) (chunkSize : Nat)
   (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (cacheMax : Nat)
   : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-  let fuel := (length t + pattern.size + 1) * 8 + 64
+  let fuel := (height t + 4) * 32 + 64
   searchNextCore t pt pattern startOffset chunkSize useBloom cache order cacheMax fuel
 
 /-- Search backward for a byte pattern ending before startExclusive -/
@@ -1026,7 +1051,7 @@ private def searchPrevCore (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : 
 def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startExclusive : Nat) (chunkSize : Nat)
   (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (cacheMax : Nat)
   : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-  let fuel := (length t + pattern.size + 1) * 8 + 64
+  let fuel := (height t + 4) * 32 + 64
   searchPrevCore t pt pattern startExclusive chunkSize useBloom cache order cacheMax fuel
 
 end PieceTree
