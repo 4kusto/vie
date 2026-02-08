@@ -64,7 +64,7 @@ structure FloatingOverlayLayout where
   contentRows : Nat
   deriving Inhabited
 
-def computeFloatingOverlayLayout (rows cols : Nat) (overlay : FloatingOverlay) : Option FloatingOverlayLayout := Id.run do
+def computeFloatingOverlayLayout (rows cols : Nat) (tabStop : Nat) (overlay : FloatingOverlay) : Option FloatingOverlayLayout := Id.run do
   let availableRows := if rows > 1 then rows - 1 else rows
   if cols < 8 || availableRows < 4 then
     return none
@@ -73,8 +73,8 @@ def computeFloatingOverlayLayout (rows cols : Nat) (overlay : FloatingOverlay) :
   let titleText := if overlay.title.isEmpty then "" else s!"[{overlay.title}]"
   let titleRows := if titleText.isEmpty then 0 else 1
 
-  let naturalWidthContent := lines.foldl (fun acc ln => max acc (Unicode.stringWidth ln)) 0
-  let naturalWidth := max naturalWidthContent (Unicode.stringWidth titleText)
+  let naturalWidthContent := lines.foldl (fun acc ln => max acc (Unicode.stringWidthWithTabStop ln tabStop)) 0
+  let naturalWidth := max naturalWidthContent (Unicode.stringWidthWithTabStop titleText tabStop)
   let maxInnerWidth := if cols > 8 then cols - 8 else 1
   let targetWidth :=
     if overlay.maxWidth > 0 then
@@ -105,8 +105,8 @@ def computeFloatingOverlayLayout (rows cols : Nat) (overlay : FloatingOverlay) :
     contentRows := contentRows
   }
 
-def renderFloatingOverlay (rows cols : Nat) (overlay : FloatingOverlay) : Array String := Id.run do
-  let some layout := computeFloatingOverlayLayout rows cols overlay | return #[]
+def renderFloatingOverlay (rows cols : Nat) (tabStop : Nat) (overlay : FloatingOverlay) : Array String := Id.run do
+  let some layout := computeFloatingOverlayLayout rows cols tabStop overlay | return #[]
   let lines := if overlay.lines.isEmpty then #[""] else overlay.lines
   let titleText := if overlay.title.isEmpty then "" else s!"[{overlay.title}]"
   let top := layout.top
@@ -124,15 +124,19 @@ def renderFloatingOverlay (rows cols : Nat) (overlay : FloatingOverlay) : Array 
 
   if titleRows == 1 then
     out := out.push (Terminal.moveCursorStr (top + 1) left)
-    let clippedTitle := Unicode.takeByDisplayWidth titleText.toRawSubstring innerWidth
-    out := out.push s!"| {rightPadVisual clippedTitle innerWidth} |"
+    let clippedTitle := Unicode.takeByDisplayWidthWithTabStop titleText.toRawSubstring tabStop innerWidth
+    let titleW := Unicode.stringWidthWithTabStop clippedTitle tabStop
+    let titlePad := if titleW < innerWidth then "".pushn ' ' (innerWidth - titleW) else ""
+    out := out.push s!"| {clippedTitle}{titlePad} |"
 
   for i in [0:contentRows] do
     let raw := lines[i]?.getD ""
-    let clipped := Unicode.takeByDisplayWidth raw.toRawSubstring innerWidth
+    let clipped := Unicode.takeByDisplayWidthWithTabStop raw.toRawSubstring tabStop innerWidth
+    let clippedW := Unicode.stringWidthWithTabStop clipped tabStop
+    let pad := if clippedW < innerWidth then "".pushn ' ' (innerWidth - clippedW) else ""
     let row := top + 1 + titleRows + i
     out := out.push (Terminal.moveCursorStr row left)
-    out := out.push s!"| {rightPadVisual clipped innerWidth} |"
+    out := out.push s!"| {clipped}{pad} |"
 
   let bottom := top + contentRows + titleRows + 1
   out := out.push (Terminal.moveCursorStr bottom left)

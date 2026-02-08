@@ -75,7 +75,7 @@ def parseKey (state : EditorState) (c : Char) (currentTime : Nat) : (EditorState
         | '\x06' => Key.ctrl 'f'
         | '\x07' => Key.ctrl 'g'
         | '\x08' => Key.ctrl 'h'
-        | '\x09' => Key.ctrl 'i'
+        | '\x09' => Key.char '\t'
         | '\x0b' => Key.ctrl 'k'
         | '\x0c' => Key.ctrl 'l'
         | '\x0e' => Key.ctrl 'n'

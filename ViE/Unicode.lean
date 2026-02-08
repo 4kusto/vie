@@ -246,4 +246,168 @@ def takeByDisplayWidth (s : Substring.Raw) (width : Nat) : String :=
     termination_by s.bsize - i.1
   loop 0 0 ""
 
+/-- Normalize invalid tab stop values.
+    Tab stop 0 would break modulo logic, so clamp to 1. -/
+def normalizeTabStop (tabStop : Nat) : Nat :=
+  if tabStop == 0 then 1 else tabStop
+
+/-- Display width contribution of a tab at a given display column. -/
+def tabWidthAt (tabStop : Nat) (col : Nat) : Nat :=
+  let ts := normalizeTabStop tabStop
+  let rem := col % ts
+  if rem == 0 then ts else ts - rem
+
+/-- Character width with tab-stop awareness. -/
+def charWidthAt (tabStop : Nat) (col : Nat) (c : Char) : Nat :=
+  if c == '\t' then
+    tabWidthAt tabStop col
+  else
+    charWidth c
+
+/-- Display text for a character with tab-stop awareness. -/
+def getDisplayStringAt (tabStop : Nat) (col : Nat) (c : Char) : String :=
+  if c == '\t' then
+    "".pushn ' ' (tabWidthAt tabStop col)
+  else
+    getDisplayString c
+
+/-- Calculate the total visual width of a string with tab-stop awareness. -/
+def stringWidthWithTabStop (s : String) (tabStop : Nat) : Nat :=
+  let rec loop (cs : List Char) (acc : Nat) : Nat :=
+    match cs with
+    | [] => acc
+    | c :: rest =>
+      let w := charWidthAt tabStop acc c
+      loop rest (acc + w)
+  loop s.toList 0
+
+/-- Calculate the total visual width of a substring with tab-stop awareness. -/
+def substringWidthWithTabStop (s : Substring.Raw) (tabStop : Nat) : Nat :=
+  let rec loop (i : String.Pos.Raw) (acc : Nat) : Nat :=
+    if h : i.byteIdx < s.bsize then
+      let c := s.get i
+      let i' := s.next i
+      have := Nat.sub_lt_sub_left h (Substring.Raw.lt_next s i h)
+      let w := charWidthAt tabStop acc c
+      loop i' (acc + w)
+    else
+      acc
+    termination_by s.bsize - i.1
+  loop 0 0
+
+/-- Convert a display column to a character index (0-based), tab-stop aware. -/
+def displayColToCharIndexWithTabStop (s : String) (tabStop : Nat) (col : Nat) : Nat :=
+  let rec loop (cs : List Char) (idx width : Nat) : Nat :=
+    match cs with
+    | [] => idx
+    | c :: rest =>
+      let w := charWidthAt tabStop width c
+      if width + w > col then
+        idx
+      else
+        loop rest (idx + 1) (width + w)
+  loop s.toList 0 0
+
+/-- Display width of the first `idx` characters in a string, tab-stop aware. -/
+def displayWidthAtCharIndexWithTabStop (s : String) (tabStop : Nat) (idx : Nat) : Nat :=
+  let rec loop (cs : List Char) (i acc : Nat) : Nat :=
+    match cs with
+    | [] => acc
+    | c :: rest =>
+      if i >= idx then
+        acc
+      else
+        let w := charWidthAt tabStop acc c
+        loop rest (i + 1) (acc + w)
+  loop s.toList 0 0
+
+/-- Convert a display column to a UTF-8 byte offset within a string, tab-stop aware. -/
+def displayColToByteOffsetWithTabStop (s : String) (tabStop : Nat) (col : Nat) : Nat :=
+  let rec loop (cs : List Char) (byteAcc widthAcc : Nat) : Nat :=
+    match cs with
+    | [] => byteAcc
+    | c :: rest =>
+      let w := charWidthAt tabStop widthAcc c
+      let b := c.toString.toUTF8.size
+      if widthAcc + w > col then
+        byteAcc
+      else
+        loop rest (byteAcc + b) (widthAcc + w)
+  loop s.toList 0 0
+
+/-- Build display-column to byte-offset index with tab-stop awareness. -/
+def buildDisplayByteIndexWithTabStop (s : String) (tabStop : Nat) : Array (Nat × Nat) :=
+  let rec loop (cs : List Char) (disp bytes : Nat) (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
+    match cs with
+    | [] => acc
+    | c :: rest =>
+      let w := charWidthAt tabStop disp c
+      let b := c.toString.toUTF8.size
+      let disp' := disp + w
+      let bytes' := bytes + b
+      loop rest disp' bytes' (acc.push (disp', bytes'))
+  loop s.toList 0 0 #[(0, 0)]
+
+/-- Compute next display column (one character advance), tab-stop aware. -/
+def nextDisplayColWithTabStop (s : String) (tabStop : Nat) (col : Nat) : Nat :=
+  let idx := displayColToCharIndexWithTabStop s tabStop col
+  let startWidth := displayWidthAtCharIndexWithTabStop s tabStop idx
+  if col < startWidth then
+    startWidth
+  else
+    let chars := s.toList
+    if idx < chars.length then
+      let w := charWidthAt tabStop startWidth (chars[idx]!)
+      startWidth + w
+    else
+      col
+
+/-- Compute previous display column (one character back), tab-stop aware. -/
+def prevDisplayColWithTabStop (s : String) (tabStop : Nat) (col : Nat) : Nat :=
+  if col == 0 then
+    0
+  else
+    let idx := displayColToCharIndexWithTabStop s tabStop col
+    let startWidth := displayWidthAtCharIndexWithTabStop s tabStop idx
+    if col > startWidth then
+      startWidth
+    else if idx == 0 then
+      0
+    else
+      displayWidthAtCharIndexWithTabStop s tabStop (idx - 1)
+
+/-- Drop `width` display columns from substring start, tab-stop aware. -/
+def dropByDisplayWidthWithTabStop (s : Substring.Raw) (tabStop : Nat) (width : Nat) : Substring.Raw :=
+  let rec loop (i : String.Pos.Raw) (acc : Nat) : Substring.Raw :=
+    if h : i.byteIdx < s.bsize then
+      let c := s.get i
+      let w := charWidthAt tabStop acc c
+      if acc + w > width then
+        s.extract i ⟨s.bsize⟩
+      else
+        let i' := s.next i
+        have := Nat.sub_lt_sub_left h (Substring.Raw.lt_next s i h)
+        loop i' (acc + w)
+    else
+      s.extract i ⟨s.bsize⟩
+    termination_by s.bsize - i.1
+  loop 0 0
+
+/-- Take characters from substring until visual width limit, tab-stop aware. -/
+def takeByDisplayWidthWithTabStop (s : Substring.Raw) (tabStop : Nat) (width : Nat) : String :=
+  let rec loop (i : String.Pos.Raw) (currW : Nat) (acc : String) : String :=
+    if h : i.byteIdx < s.bsize then
+      let c := s.get i
+      let w := charWidthAt tabStop currW c
+      if currW + w <= width then
+        let i' := s.next i
+        have := Nat.sub_lt_sub_left h (Substring.Raw.lt_next s i h)
+        loop i' (currW + w) (acc ++ getDisplayStringAt tabStop currW c)
+      else
+        acc
+    else
+      acc
+    termination_by s.bsize - i.1
+  loop 0 0 ""
+
 end ViE.Unicode

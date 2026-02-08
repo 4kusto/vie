@@ -236,28 +236,29 @@ def PieceTable.lineCount (pt : PieceTable) : Nat :=
   -- Keep lineCount consistent with getLineRange/getLine and cursor rows.
   breaks + 1
 
-private def PieceTable.findLineForOffsetCore (pt : PieceTable) (target : Nat) (low high : Nat) (fuel : Nat) : Option (Nat × Nat) :=
-  match fuel with
-  | 0 => none
-  | fuel + 1 =>
-    if low > high then none
-    else
-      let mid := (low + high) / 2
-      match pt.getLineRange mid with
-      | some (start, len) =>
-        let endOff := start + len
-        if target >= start && target <= endOff then
-          some (mid, target - start)
-        else if target < start then
-           if mid == 0 then none
-           else PieceTable.findLineForOffsetCore pt target low (mid - 1) fuel
-        else
-           PieceTable.findLineForOffsetCore pt target (mid + 1) high fuel
-      | none => none
+private def PieceTable.findLineForOffsetCore (pt : PieceTable) (target : Nat) (low highExcl : Nat) : Option (Nat × Nat) :=
+  if low >= highExcl then none
+  else
+    let mid := low + (highExcl - low) / 2
+    match pt.getLineRange mid with
+    | some (start, len) =>
+      let endOff := start + len
+      if target >= start && target <= endOff then
+        some (mid, target - start)
+      else if target < start then
+        PieceTable.findLineForOffsetCore pt target low mid
+      else
+        PieceTable.findLineForOffsetCore pt target (mid + 1) highExcl
+    | none => none
+  termination_by highExcl - low
+  decreasing_by
+    · simp_wf
+      omega
+    · simp_wf
+      omega
 
 def PieceTable.findLineForOffset (pt : PieceTable) (target : Nat) (low high : Nat) : Option (Nat × Nat) :=
-  let fuel := pt.lineCount + 1
-  PieceTable.findLineForOffsetCore pt target low high fuel
+  PieceTable.findLineForOffsetCore pt target low (high + 1)
 
 def PieceTable.getPointFromOffset (pt : PieceTable) (offset : Nat) : (Nat × Nat) :=
   let hi := pt.lineCount - 1

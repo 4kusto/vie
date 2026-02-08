@@ -100,7 +100,7 @@ def render (state : EditorState) : IO EditorState := do
 
   let overlayToRender := stateAfterLayout.floatingOverlay.orElse (fun _ => messageOverlayForState stateAfterLayout)
   if let some overlay := overlayToRender then
-    buffer := buffer ++ renderFloatingOverlay rows cols overlay
+    buffer := buffer ++ renderFloatingOverlay rows cols stateAfterLayout.config.tabStop overlay
 
   -- Set Physical Cursor
   let rec getCursorPos (l : Layout) (r c h w : Nat) : Option (Nat × Nat) :=
@@ -132,14 +132,14 @@ def render (state : EditorState) : IO EditorState := do
     match stateAfterLayout.floatingOverlay with
     | none => none
     | some overlay =>
-        match computeFloatingOverlayLayout rows cols overlay with
+        match computeFloatingOverlayLayout rows cols stateAfterLayout.config.tabStop overlay with
         | none => none
         | some layout =>
             let lines := if overlay.lines.isEmpty then #[""] else overlay.lines
             let maxRow := lines.size - 1
             let rowIdx := min overlay.cursorRow maxRow
             let line := lines[rowIdx]!
-            let lineW := Unicode.stringWidth line
+            let lineW := Unicode.stringWidthWithTabStop line stateAfterLayout.config.tabStop
             let colIdx := min overlay.cursorCol lineW
             let visRow := min rowIdx (layout.contentRows - 1)
             let visCol := min colIdx layout.innerWidth

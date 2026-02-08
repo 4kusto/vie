@@ -35,7 +35,7 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
       let cachedRaw := buf.cache.findRaw lineIdx
       let cachedIdx := buf.cache.findIndex lineIdx
       let lineStr := cachedRaw.getD (getLineFromBuffer buf lineIdx |>.getD "")
-      let lineIndex := cachedIdx.getD (ViE.Unicode.buildDisplayByteIndex lineStr)
+      let lineIndex := cachedIdx.getD (ViE.Unicode.buildDisplayByteIndexWithTabStop lineStr state.config.tabStop)
       let (displayLine, nextSt) :=
         match cachedLine with
         | some (s, cachedScrollCol, cachedWidth) =>
@@ -44,16 +44,16 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
             else
               match getLineFromBuffer buf lineIdx with
               | some lineStr =>
-                  let sub := ViE.Unicode.dropByDisplayWidth lineStr.toRawSubstring view.scrollCol.val
-                  let dl := takeVisual sub availableWidth
+                  let sub := ViE.Unicode.dropByDisplayWidthWithTabStop lineStr.toRawSubstring state.config.tabStop view.scrollCol.val
+                  let dl := ViE.Unicode.takeByDisplayWidthWithTabStop sub state.config.tabStop availableWidth
                   let cache := match cachedRaw, cachedIdx with
                     | some raw, some _ =>
                         if raw == lineStr then
                           buf.cache
                         else
-                          (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
+                          (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndexWithTabStop lineStr state.config.tabStop))
                     | _, _ =>
-                        (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
+                        (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndexWithTabStop lineStr state.config.tabStop))
                   let cache := (cache.update lineIdx dl view.scrollCol.val availableWidth).updateRaw lineIdx lineStr
                   let updatedBuf := { buf with cache := cache }
                   let s' := currentSt.updateCurrentWorkspace fun ws =>
@@ -62,16 +62,16 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
               | none => ("", currentSt)
         | none =>
             if let some lineStr := getLineFromBuffer buf lineIdx then
-              let sub := ViE.Unicode.dropByDisplayWidth lineStr.toRawSubstring view.scrollCol.val
-              let dl := takeVisual sub availableWidth
+              let sub := ViE.Unicode.dropByDisplayWidthWithTabStop lineStr.toRawSubstring state.config.tabStop view.scrollCol.val
+              let dl := ViE.Unicode.takeByDisplayWidthWithTabStop sub state.config.tabStop availableWidth
               let cache := match cachedRaw, cachedIdx with
                 | some raw, some _ =>
                     if raw == lineStr then
                       buf.cache
                     else
-                      (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
+                      (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndexWithTabStop lineStr state.config.tabStop))
                 | _, _ =>
-                    (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndex lineStr))
+                    (buf.cache.updateIndex lineIdx (ViE.Unicode.buildDisplayByteIndexWithTabStop lineStr state.config.tabStop))
               let cache := (cache.update lineIdx dl view.scrollCol.val availableWidth).updateRaw lineIdx lineStr
               let updatedBuf := { buf with cache := cache }
               let s' := currentSt.updateCurrentWorkspace fun ws =>
@@ -194,9 +194,9 @@ def renderFloatingWindow
   for i in [0:innerH] do
     let lineIdx : Row := ⟨view.scrollRow.val + i⟩
     let raw := if lineIdx.val < FileBuffer.lineCount buf then getLineFromBuffer buf lineIdx |>.getD "" else ""
-    let sub := ViE.Unicode.dropByDisplayWidth raw.toRawSubstring view.scrollCol.val
-    let plainShown := takeVisual sub textW
-    let shownW := Unicode.stringWidth plainShown
+    let sub := ViE.Unicode.dropByDisplayWidthWithTabStop raw.toRawSubstring st.config.tabStop view.scrollCol.val
+    let plainShown := ViE.Unicode.takeByDisplayWidthWithTabStop sub st.config.tabStop textW
+    let shownW := Unicode.stringWidthWithTabStop plainShown st.config.tabStop
     let shown :=
       if hasSelection then
         Id.run do

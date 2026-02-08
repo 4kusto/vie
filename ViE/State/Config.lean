@@ -24,6 +24,7 @@ def defaultConfig : EditorConfig := {
   dirIcon := "📁 "
   searchHighlightStyle := (ViE.Color.toBg .white) ++ (ViE.Color.toFg .black)
   searchHighlightCursorStyle := (ViE.Color.toBg .yellow) ++ (ViE.Color.toFg .black)
+  tabStop := 4
   searchBloomCacheMax := 1024
   searchBloomBuildLeafBits := true
 }

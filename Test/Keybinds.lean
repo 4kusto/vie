@@ -114,6 +114,21 @@ def testEditing : IO Unit := do
   let s_A ← runKeys s_a [Key.char '0', Key.char 'A', Key.char 'z', Key.esc]
   assertBuffer "A appends at end" s_A "xyz"
 
+  let s_tab_insert ← runKeys s0 [Key.char 'i', Key.char '\t']
+  assertCursor "Tab advances cursor to next tab stop in insert mode" s_tab_insert 0 4
+
+  let s_tab_backspace ← runKeys s0 [Key.char 'i', Key.char '\t', Key.backspace]
+  assertBuffer "Tab backspace deletes tab in insert mode" s_tab_backspace ""
+  assertCursor "Tab backspace restores cursor column" s_tab_backspace 0 0
+
+  let s_tab ← runKeys s0 [Key.char 'i', Key.char '\t', Key.esc]
+  assertBuffer "Tab inserts in insert mode" s_tab "\t"
+  assertCursor "Esc after tab returns to tab char in normal mode" s_tab 0 0
+
+  let s0_tab8 := { s0 with config := { s0.config with tabStop := 8 } }
+  let s_tab8 ← runKeys s0_tab8 [Key.char 'i', Key.char '\t']
+  assertCursor "Tab follows custom tabStop in insert mode" s_tab8 0 8
+
   -- o, O
   let s_o ← runKeys s_i [Key.char 'o', Key.char 'y', Key.esc]
   assertBuffer "o inserts line below" s_o "x\ny"

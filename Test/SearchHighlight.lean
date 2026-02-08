@@ -66,4 +66,7 @@ def test : IO Unit := do
   assertEqual "Overlong unknown CSI flushes emitted keys" true (!emitted.isEmpty)
   assertEqual "Overlong unknown CSI clears pending state" "" pLong.inputState.pendingKeys
 
+  let (_, tabKeys) := ViE.parseKey ViE.initialState '\x09' (t0 + 30)
+  assertEqual "Tab parses as char tab" [Key.char '\t'] tabKeys
+
 end Test.SearchHighlight

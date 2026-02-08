@@ -21,34 +21,36 @@ def EditorState.setScroll (s : EditorState) (row : Row) (col : Col) : EditorStat
 def lineString (buffer : FileBuffer) (row : Row) : String :=
   ViE.getLineFromBuffer buffer row |>.getD ""
 
-def lineDisplayWidth (buffer : FileBuffer) (row : Row) : Nat :=
-  ViE.getLineLengthFromBuffer buffer row |>.getD 0
+def lineDisplayWidth (tabStop : Nat) (buffer : FileBuffer) (row : Row) : Nat :=
+  ViE.getLineLengthFromBufferWithTabStop buffer row tabStop |>.getD 0
 
-def charAtDisplayCol (lineStr : String) (col : Col) : Char :=
-  let idx := ViE.Unicode.displayColToCharIndex lineStr col.val
+def charAtDisplayCol (tabStop : Nat) (lineStr : String) (col : Col) : Char :=
+  let idx := ViE.Unicode.displayColToCharIndexWithTabStop lineStr tabStop col.val
   List.getD lineStr.toList idx ' '
 
-def nextCol (buffer : FileBuffer) (row : Row) (col : Col) : Col :=
+def nextCol (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) : Col :=
   let lineStr := lineString buffer row
-  ⟨ViE.Unicode.nextDisplayCol lineStr col.val⟩
+  ⟨ViE.Unicode.nextDisplayColWithTabStop lineStr tabStop col.val⟩
 
-def prevCol (buffer : FileBuffer) (row : Row) (col : Col) : Col :=
+def prevCol (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) : Col :=
   let lineStr := lineString buffer row
-  ⟨ViE.Unicode.prevDisplayCol lineStr col.val⟩
+  ⟨ViE.Unicode.prevDisplayColWithTabStop lineStr tabStop col.val⟩
 
 def EditorState.moveCursorLeft (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let cursor := s.getCursor
   if cursor.col.val > 0 then
-     let newCol := prevCol s.getActiveBuffer cursor.row cursor.col
+     let newCol := prevCol tabStop s.getActiveBuffer cursor.row cursor.col
      s.setCursor { cursor with col := newCol }
   else
      s
 
 def EditorState.moveCursorRight (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let cursor := s.getCursor
   let buffer := s.getActiveBuffer
-  let limit := lineDisplayWidth buffer cursor.row
-  let newCol := nextCol buffer cursor.row cursor.col
+  let limit := lineDisplayWidth tabStop buffer cursor.row
+  let newCol := nextCol tabStop buffer cursor.row cursor.col
 
   if cursor.col.val < limit && newCol.val != cursor.col.val then
      s.setCursor { cursor with col := newCol }
@@ -56,20 +58,22 @@ def EditorState.moveCursorRight (s : EditorState) : EditorState :=
      s
 
 def EditorState.moveCursorUp (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let cursor := s.getCursor
   if cursor.row.val > 0 then
     let newRow : Row := ⟨cursor.row.val - 1⟩
-    let lineLen := lineDisplayWidth s.getActiveBuffer newRow
+    let lineLen := lineDisplayWidth tabStop s.getActiveBuffer newRow
     s.setCursor { cursor with row := newRow, col := ⟨min cursor.col.val lineLen⟩ }
   else
     s
 
 def EditorState.moveCursorDown (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let cursor := s.getCursor
   let buffer := s.getActiveBuffer
   if cursor.row.val < buffer.lineCount - 1 then
     let newRow : Row := ⟨cursor.row.val + 1⟩
-    let lineLen := lineDisplayWidth buffer newRow
+    let lineLen := lineDisplayWidth tabStop buffer newRow
     s.setCursor { cursor with row := newRow, col := ⟨min cursor.col.val lineLen⟩ }
   else
     s
@@ -96,18 +100,20 @@ def EditorState.getCount (s : EditorState) : Nat :=
   | none => 1
 
 def EditorState.jumpToColumn (s : EditorState) (col : Nat) : EditorState :=
+  let tabStop := s.config.tabStop
   let cursor := s.getCursor
-  let len := lineDisplayWidth s.getActiveBuffer cursor.row
+  let len := lineDisplayWidth tabStop s.getActiveBuffer cursor.row
   let newCol : Col := ⟨min (col - 1) len⟩ -- 1-indexed to 0-indexed, clamped
   let s' := s.setCursor { cursor with col := newCol }
   { s' with inputState := { s'.inputState with countBuffer := "" } }
 
 def EditorState.jumpToLine (s : EditorState) (line : Nat) : EditorState :=
+  let tabStop := s.config.tabStop
   let buffer := s.getActiveBuffer
   let maxLine := buffer.lineCount
   let newRowVal := if line == 0 then 0 else min (line - 1) (maxLine - 1)
   let newRow : Row := ⟨newRowVal⟩
-  let lineLen := lineDisplayWidth buffer newRow
+  let lineLen := lineDisplayWidth tabStop buffer newRow
   let cursor := s.getCursor
   let newCol : Col := ⟨min cursor.col.val lineLen⟩
   let s' := s.setCursor { cursor with row := newRow, col := newCol }
@@ -119,13 +125,15 @@ def EditorState.moveToLineStart (s : EditorState) : EditorState :=
   s.setCursor { cursor with col := 0 }
 
 def EditorState.moveToLineEnd (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let cursor := s.getCursor
-  let len := lineDisplayWidth s.getActiveBuffer cursor.row
+  let len := lineDisplayWidth tabStop s.getActiveBuffer cursor.row
   s.setCursor { cursor with col := ⟨len⟩ }
 
 def EditorState.clampCursor (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let cursor := s.getCursor
-  let len := lineDisplayWidth s.getActiveBuffer cursor.row
+  let len := lineDisplayWidth tabStop s.getActiveBuffer cursor.row
   match s.mode with
   | Mode.insert =>
     if cursor.col.val > len then
@@ -149,96 +157,97 @@ def wordMoveFuel (buffer : FileBuffer) : Nat :=
   max 1 (buffer.table.length + FileBuffer.lineCount buffer + 1)
 
 mutual
-  def findNextForwardCore (buffer : FileBuffer) (row : Row) (col : Col) (started : Bool) (fuel : Nat) : Row × Col :=
+  def findNextForwardCore (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (started : Bool) (fuel : Nat) : Row × Col :=
     match fuel with
     | 0 => (row, col)
     | fuel + 1 =>
-      let lineLen := lineDisplayWidth buffer row
+      let lineLen := lineDisplayWidth tabStop buffer row
       if lineLen == 0 then
          (row, 0) -- Stop at empty line
       else if col.val >= lineLen then
          -- End of line, wrap to next line
          if row.val + 1 < FileBuffer.lineCount buffer then
            let nextRow := row.succ
-           let nextLen := lineDisplayWidth buffer nextRow
+           let nextLen := lineDisplayWidth tabStop buffer nextRow
            if nextLen == 0 then
               (nextRow, 0) -- Stop at empty line
            else
-              findNextForwardCore buffer nextRow 0 true fuel
+              findNextForwardCore tabStop buffer nextRow 0 true fuel
          else
            (row, col) -- End of file
       else
         let lineStr := lineString buffer row
-        let c := charAtDisplayCol lineStr col
+        let c := charAtDisplayCol tabStop lineStr col
         let isKw := isKeyword c
         let isSpace := c.isWhitespace
         if !started then
           if isSpace then
-             findNextForwardCore buffer row (nextCol buffer row col) true fuel
+             findNextForwardCore tabStop buffer row (nextCol tabStop buffer row col) true fuel
           else
-             findNextWordEndForwardCore buffer row (nextCol buffer row col) isKw fuel
+             findNextWordEndForwardCore tabStop buffer row (nextCol tabStop buffer row col) isKw fuel
         else
            if isSpace then
-              findNextForwardCore buffer row (nextCol buffer row col) started fuel
+              findNextForwardCore tabStop buffer row (nextCol tabStop buffer row col) started fuel
            else
               (row, col) -- Found start of next word
 
-  def findNextWordEndForwardCore (buffer : FileBuffer) (row : Row) (col : Col) (wasTv : Bool) (fuel : Nat) : Row × Col :=
+  def findNextWordEndForwardCore (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wasTv : Bool) (fuel : Nat) : Row × Col :=
     match fuel with
     | 0 => (row, col)
     | fuel + 1 =>
-      let lineLen := lineDisplayWidth buffer row
+      let lineLen := lineDisplayWidth tabStop buffer row
       if col.val >= lineLen then
         if row.val + 1 < FileBuffer.lineCount buffer then
-          findNextForwardCore buffer row.succ 0 true fuel
+          findNextForwardCore tabStop buffer row.succ 0 true fuel
         else
           (row, col)
       else
         let lineStr := lineString buffer row
-        let c := charAtDisplayCol lineStr col
+        let c := charAtDisplayCol tabStop lineStr col
         let isKw := isKeyword c
         let isSpace := c.isWhitespace
         if isSpace then
-           findNextForwardCore buffer row (nextCol buffer row col) true fuel
+           findNextForwardCore tabStop buffer row (nextCol tabStop buffer row col) true fuel
         else if isKw != wasTv then
            (row, col)
         else
-           findNextWordEndForwardCore buffer row (nextCol buffer row col) wasTv fuel
+           findNextWordEndForwardCore tabStop buffer row (nextCol tabStop buffer row col) wasTv fuel
 end
 
-def findNextForward (buffer : FileBuffer) (row : Row) (col : Col) (started : Bool) : Row × Col :=
-  findNextForwardCore buffer row col started (wordMoveFuel buffer)
+def findNextForward (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (started : Bool) : Row × Col :=
+  findNextForwardCore tabStop buffer row col started (wordMoveFuel buffer)
 
-def findNextWordEndForward (buffer : FileBuffer) (row : Row) (col : Col) (wasTv : Bool) : Row × Col :=
-  findNextWordEndForwardCore buffer row col wasTv (wordMoveFuel buffer)
+def findNextWordEndForward (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wasTv : Bool) : Row × Col :=
+  findNextWordEndForwardCore tabStop buffer row col wasTv (wordMoveFuel buffer)
 
 /-- Move forward to start of next word (w) -/
 def EditorState.moveWordForward (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let buffer := s.getActiveBuffer
   let cursor := s.getCursor
-  let currLineLen := lineDisplayWidth buffer cursor.row
+  let currLineLen := lineDisplayWidth tabStop buffer cursor.row
   let (r, c) := if currLineLen == 0 then
                    if cursor.row.val + 1 < FileBuffer.lineCount buffer then
-                      findNextForward buffer cursor.row.succ 0 true
+                      findNextForward tabStop buffer cursor.row.succ 0 true
                    else
                       (cursor.row, 0)
                 else
                    let lineStr := lineString buffer cursor.row
                    if cursor.col.val < currLineLen then
-                      let ch := charAtDisplayCol lineStr cursor.col
+                      let ch := charAtDisplayCol tabStop lineStr cursor.col
                       let isKw := isKeyword ch
                       let isSpace := ch.isWhitespace
                       if isSpace then
-                         findNextForward buffer cursor.row (nextCol buffer cursor.row cursor.col) true
+                         findNextForward tabStop buffer cursor.row (nextCol tabStop buffer cursor.row cursor.col) true
                       else
-                         findNextWordEndForward buffer cursor.row (nextCol buffer cursor.row cursor.col) isKw
+                         findNextWordEndForward tabStop buffer cursor.row (nextCol tabStop buffer cursor.row cursor.col) isKw
                    else
                       if cursor.row.val + 1 < FileBuffer.lineCount buffer then
-                         findNextForward buffer cursor.row.succ 0 true
+                         findNextForward tabStop buffer cursor.row.succ 0 true
                       else
                          (cursor.row, ⟨currLineLen⟩)
 
-  let finalLineLen := lineDisplayWidth buffer r
+  let finalLineLen := lineDisplayWidth tabStop buffer r
   let finalColVal := if r.val + 1 >= FileBuffer.lineCount buffer && c.val >= finalLineLen && finalLineLen > 0 && s.mode != Mode.insert then
                         finalLineLen - 1
                      else
@@ -248,127 +257,129 @@ def EditorState.moveWordForward (s : EditorState) : EditorState :=
 
 
 mutual
-  def findPrevStartCore (buffer : FileBuffer) (row : Row) (col : Col) (fuel : Nat) : Row × Col :=
+  def findPrevStartCore (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (fuel : Nat) : Row × Col :=
     match fuel with
     | 0 => (row, col)
     | fuel + 1 =>
       let lineStr := lineString buffer row
-      let c := charAtDisplayCol lineStr col
+      let c := charAtDisplayCol tabStop lineStr col
       if c.isWhitespace then
          if col.val == 0 then
             if row.val > 0 then
                let prevRow := row.pred
-               let prevLen := lineDisplayWidth buffer prevRow
-               if prevLen > 0 then findPrevStartCore buffer prevRow ⟨prevLen - 1⟩ fuel else (prevRow, 0)
+               let prevLen := lineDisplayWidth tabStop buffer prevRow
+               if prevLen > 0 then findPrevStartCore tabStop buffer prevRow ⟨prevLen - 1⟩ fuel else (prevRow, 0)
             else (0, 0)
          else
-            findPrevStartCore buffer row (prevCol buffer row col) fuel
+            findPrevStartCore tabStop buffer row (prevCol tabStop buffer row col) fuel
       else
          let isKw := isKeyword c
-         consumeWordBackwardCore buffer row col isKw fuel
+         consumeWordBackwardCore tabStop buffer row col isKw fuel
 
-  def consumeWordBackwardCore (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) (fuel : Nat) : Row × Col :=
+  def consumeWordBackwardCore (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) (fuel : Nat) : Row × Col :=
     match fuel with
     | 0 => (row, col)
     | fuel + 1 =>
       let lineStr := lineString buffer row
-      let c := charAtDisplayCol lineStr col
+      let c := charAtDisplayCol tabStop lineStr col
       let isKw := isKeyword c
       if c.isWhitespace || isKw != wantKw then
-         (row, nextCol buffer row col)
+         (row, nextCol tabStop buffer row col)
       else
          if col.val == 0 then (row, 0)
-         else consumeWordBackwardCore buffer row (prevCol buffer row col) wantKw fuel
+         else consumeWordBackwardCore tabStop buffer row (prevCol tabStop buffer row col) wantKw fuel
 end
 
-def findPrevStart (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
-  findPrevStartCore buffer row col (wordMoveFuel buffer)
+def findPrevStart (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
+  findPrevStartCore tabStop buffer row col (wordMoveFuel buffer)
 
-def consumeWordBackward (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
-  consumeWordBackwardCore buffer row col wantKw (wordMoveFuel buffer)
+def consumeWordBackward (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
+  consumeWordBackwardCore tabStop buffer row col wantKw (wordMoveFuel buffer)
 
 /-- Move backward to start of previous word (b) -/
 def EditorState.moveWordBackward (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let buffer := s.getActiveBuffer
   let cursor := s.getCursor
   if cursor.row.val == 0 && cursor.col.val == 0 then s
   else
-      let lineLen := lineDisplayWidth buffer cursor.row
+      let lineLen := lineDisplayWidth tabStop buffer cursor.row
       let startCol : Col := if cursor.col.val >= lineLen then ⟨lineLen⟩ else cursor.col
       let (r, c) :=
          if startCol.val == 0 then
             if cursor.row.val > 0 then
                let prevRow := cursor.row.pred
-               let prevLen := lineDisplayWidth buffer prevRow
+               let prevLen := lineDisplayWidth tabStop buffer prevRow
                if prevLen > 0 then
-                  findPrevStart buffer prevRow ⟨prevLen - 1⟩
+                  findPrevStart tabStop buffer prevRow ⟨prevLen - 1⟩
                else
                   (prevRow, 0)
             else (0, 0)
          else
-            findPrevStart buffer cursor.row (prevCol buffer cursor.row startCol)
+            findPrevStart tabStop buffer cursor.row (prevCol tabStop buffer cursor.row startCol)
       s.setCursor { row := r, col := c }
 
 
 mutual
-  def findNextEndCore (buffer : FileBuffer) (row : Row) (col : Col) (fuel : Nat) : Row × Col :=
+  def findNextEndCore (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (fuel : Nat) : Row × Col :=
     match fuel with
     | 0 => (row, col)
     | fuel + 1 =>
-      let lineLen := lineDisplayWidth buffer row
+      let lineLen := lineDisplayWidth tabStop buffer row
       if col.val >= lineLen then
          if row.val + 1 < FileBuffer.lineCount buffer then
-           findNextEndCore buffer row.succ 0 fuel
+           findNextEndCore tabStop buffer row.succ 0 fuel
          else
            (row, col)
       else
          let lineStr := lineString buffer row
-         let c := charAtDisplayCol lineStr col
+         let c := charAtDisplayCol tabStop lineStr col
          if c.isWhitespace then
-            findNextEndCore buffer row (nextCol buffer row col) fuel
+            findNextEndCore tabStop buffer row (nextCol tabStop buffer row col) fuel
          else
             let isKw := isKeyword c
-            consumeWordToEndCore buffer row col isKw fuel
+            consumeWordToEndCore tabStop buffer row col isKw fuel
 
-  def consumeWordToEndCore (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) (fuel : Nat) : Row × Col :=
+  def consumeWordToEndCore (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) (fuel : Nat) : Row × Col :=
     match fuel with
     | 0 => (row, col)
     | fuel + 1 =>
-      let lineLen := lineDisplayWidth buffer row
-      let nextColVal := (nextCol buffer row col).val
+      let lineLen := lineDisplayWidth tabStop buffer row
+      let nextColVal := (nextCol tabStop buffer row col).val
       if nextColVal >= lineLen then
          (row, col)
       else
          let lineStr := lineString buffer row
-         let nextC := charAtDisplayCol lineStr (nextCol buffer row col)
+         let nextC := charAtDisplayCol tabStop lineStr (nextCol tabStop buffer row col)
          let nextKw := isKeyword nextC
          if nextC.isWhitespace || nextKw != wantKw then
             (row, col)
          else
-            consumeWordToEndCore buffer row (nextCol buffer row col) wantKw fuel
+            consumeWordToEndCore tabStop buffer row (nextCol tabStop buffer row col) wantKw fuel
 end
 
-def findNextEnd (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
-  findNextEndCore buffer row col (wordMoveFuel buffer)
+def findNextEnd (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
+  findNextEndCore tabStop buffer row col (wordMoveFuel buffer)
 
-def consumeWordToEnd (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
-  consumeWordToEndCore buffer row col wantKw (wordMoveFuel buffer)
+def consumeWordToEnd (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
+  consumeWordToEndCore tabStop buffer row col wantKw (wordMoveFuel buffer)
 
 /-- Move to end of word (e) -/
 def EditorState.moveWordEnd (s : EditorState) : EditorState :=
+  let tabStop := s.config.tabStop
   let buffer := s.getActiveBuffer
   let cursor := s.getCursor
-  let currLineLen := lineDisplayWidth buffer cursor.row
+  let currLineLen := lineDisplayWidth tabStop buffer cursor.row
 
-  let startCol : Col := nextCol buffer cursor.row cursor.col
+  let startCol : Col := nextCol tabStop buffer cursor.row cursor.col
   let (r, c) :=
       if startCol.val >= currLineLen then
          if cursor.row.val + 1 < FileBuffer.lineCount buffer then
-            findNextEnd buffer cursor.row.succ 0
+            findNextEnd tabStop buffer cursor.row.succ 0
          else
             (cursor.row, ⟨currLineLen⟩)
       else
-         findNextEnd buffer cursor.row startCol
+         findNextEnd tabStop buffer cursor.row startCol
 
   s.setCursor { row := r, col := c }
 

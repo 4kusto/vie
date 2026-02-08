@@ -14,23 +14,29 @@ def getLineFromBuffer (buffer : FileBuffer) (n : Row) : Option String :=
   | some s => some s
   | none => buffer.table.getLine n.val
 
-/-- Get byte offset from Row/Col (display column) using per-line index cache if available. -/
-def getOffsetFromPointInBuffer (buffer : FileBuffer) (row col : Nat) : Option Nat :=
+/-- Get byte offset from Row/Col (display column) with configurable tab stop. -/
+def getOffsetFromPointInBufferWithTabStop (buffer : FileBuffer) (row col tabStop : Nat) : Option Nat :=
   match buffer.table.getLineRange row with
   | some (startOff, len) =>
       let line := getLineFromBuffer buffer ⟨row⟩ |>.getD ""
-      let byteOff := match buffer.cache.findIndex ⟨row⟩ with
-        | some idx => ViE.Unicode.displayColToByteOffsetFromIndex idx col
-        | none => ViE.Unicode.displayColToByteOffset line col
+      let byteOff := ViE.Unicode.displayColToByteOffsetWithTabStop line tabStop col
       let clamped := if byteOff <= len then byteOff else len
       some (startOff + clamped)
   | none => none
 
-/-- Get line length from FileBuffer (delegates to PieceTable) -/
-def getLineLengthFromBuffer (buffer : FileBuffer) (n : Row) : Option Nat :=
+/-- Get line length from FileBuffer with configurable tab stop. -/
+def getLineLengthFromBufferWithTabStop (buffer : FileBuffer) (n : Row) (tabStop : Nat) : Option Nat :=
   match getLineFromBuffer buffer n with
-  | some line => some (ViE.Unicode.stringWidth line)
+  | some line => some (ViE.Unicode.stringWidthWithTabStop line tabStop)
   | none => none
+
+/-- Get byte offset from Row/Col (display column) using default tab stop. -/
+def getOffsetFromPointInBuffer (buffer : FileBuffer) (row col : Nat) : Option Nat :=
+  getOffsetFromPointInBufferWithTabStop buffer row col 4
+
+/-- Get line length from FileBuffer (delegates to PieceTable) using default tab stop. -/
+def getLineLengthFromBuffer (buffer : FileBuffer) (n : Row) : Option Nat :=
+  getLineLengthFromBufferWithTabStop buffer n 4
 
 namespace Buffer
 

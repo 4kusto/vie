@@ -6,6 +6,7 @@ open ViE.Color
 def customConfig : ViE.EditorConfig := {
   ViE.defaultConfig with
   showLineNumbers := true
+  tabStop := 4
   statusBarStyle := (toBg Color.brightBlack) ++ (toFg Color.white)
   --fileIcon := "File: "
   --dirIcon := "Dir : "
