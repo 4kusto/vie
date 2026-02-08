@@ -12,30 +12,58 @@ def buildWorkload (iterations : Nat) : PieceTable := Id.run do
     pt := pt.insert pt.tree.length s!"line {i}\n" pt.tree.length
   return pt
 
-partial def countNodes (t : PieceTree) : Nat :=
-  match t with
-  | .empty => 0
-  | .leaf _ _ _ => 1
-  | .internal cs _ _ => 1 + cs.foldl (fun acc c => acc + countNodes c) 0
+mutual
+  def countNodes (t : PieceTree) : Nat :=
+    match t with
+    | .empty => 0
+    | .leaf _ _ _ => 1
+    | .internal cs _ _ => 1 + countNodesList cs.toList
 
-partial def countLeaves (t : PieceTree) : Nat :=
-  match t with
-  | .empty => 0
-  | .leaf _ _ _ => 1
-  | .internal cs _ _ => cs.foldl (fun acc c => acc + countLeaves c) 0
+  def countNodesList (ts : List PieceTree) : Nat :=
+    match ts with
+    | [] => 0
+    | t :: rest => countNodes t + countNodesList rest
+end
 
-partial def maxLeafPieces (t : PieceTree) : Nat :=
-  match t with
-  | .empty => 0
-  | .leaf ps _ _ => ps.size
-  | .internal cs _ _ => cs.foldl (fun acc c => max acc (maxLeafPieces c)) 0
+mutual
+  def countLeaves (t : PieceTree) : Nat :=
+    match t with
+    | .empty => 0
+    | .leaf _ _ _ => 1
+    | .internal cs _ _ => countLeavesList cs.toList
 
-partial def maxInternalChildren (t : PieceTree) : Nat :=
-  match t with
-  | .empty => 0
-  | .leaf _ _ _ => 0
-  | .internal cs _ _ =>
-      cs.foldl (fun acc c => max acc (maxInternalChildren c)) cs.size
+  def countLeavesList (ts : List PieceTree) : Nat :=
+    match ts with
+    | [] => 0
+    | t :: rest => countLeaves t + countLeavesList rest
+end
+
+mutual
+  def maxLeafPieces (t : PieceTree) : Nat :=
+    match t with
+    | .empty => 0
+    | .leaf ps _ _ => ps.size
+    | .internal cs _ _ => maxLeafPiecesList cs.toList
+
+  def maxLeafPiecesList (ts : List PieceTree) : Nat :=
+    match ts with
+    | [] => 0
+    | t :: rest => max (maxLeafPieces t) (maxLeafPiecesList rest)
+end
+
+mutual
+  def maxInternalChildren (t : PieceTree) : Nat :=
+    match t with
+    | .empty => 0
+    | .leaf _ _ _ => 0
+    | .internal cs _ _ =>
+        max cs.size (maxInternalChildrenList cs.toList)
+
+  def maxInternalChildrenList (ts : List PieceTree) : Nat :=
+    match ts with
+    | [] => 0
+    | t :: rest => max (maxInternalChildren t) (maxInternalChildrenList rest)
+end
 
 def parseIterations (args : List String) : Nat :=
   let args :=

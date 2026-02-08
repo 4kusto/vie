@@ -20,47 +20,55 @@ open ViE.Command
 
 namespace ViE.Command
 
-partial def collectMatchesInBytes (haystack : ByteArray) (needle : ByteArray) : Array (Nat × Nat) :=
+def collectMatchesInBytes (haystack : ByteArray) (needle : ByteArray) : Array (Nat × Nat) :=
   let n := needle.size
   let h := haystack.size
   if n == 0 || h < n then
     #[]
   else
-    let rec loop (i : Nat) (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
-      if i + n > h then
-        acc
-      else
-        match ViE.PieceTree.findPatternInBytes haystack needle i with
-        | some idx =>
-            if idx + n > h then
-              acc
-            else
-              loop (idx + n) (acc.push (idx, idx + n))
-        | none => acc
-    loop 0 #[]
+    let rec loop (fuel : Nat) (i : Nat) (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
+      match fuel with
+      | 0 => acc
+      | fuel + 1 =>
+          if i + n > h then
+            acc
+          else
+            match ViE.PieceTree.findPatternInBytes haystack needle i with
+            | some idx =>
+                if idx + n > h then
+                  acc
+                else
+                  let nextI := if idx + n > i then idx + n else i + 1
+                  loop fuel nextI (acc.push (idx, idx + n))
+            | none => acc
+    loop (h + 1) 0 #[]
 
-partial def collectMatchesInPieceTable (pt : PieceTable) (pattern : ByteArray) : Array (Nat × Nat) :=
+def collectMatchesInPieceTable (pt : PieceTable) (pattern : ByteArray) : Array (Nat × Nat) :=
   let n := pattern.size
   if n == 0 then
     #[]
   else
     let total := pt.tree.length
-    let rec loop (offset : Nat)
+    let rec loop (fuel : Nat) (offset : Nat)
       (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
       (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
-      if offset >= total then
-        acc
-      else
-        let (res, cache', order') :=
-          ViE.PieceTree.searchNext pt.tree pt pattern offset ViE.searchChunkSize false cache order 0
-        match res with
-        | some idx =>
-            if idx + n > total then
-              acc
-            else
-              loop (idx + n) cache' order' (acc.push (idx, idx + n))
-        | none => acc
-    loop 0 Lean.RBMap.empty #[] #[]
+      match fuel with
+      | 0 => acc
+      | fuel + 1 =>
+          if offset >= total then
+            acc
+          else
+            let (res, cache', order') :=
+              ViE.PieceTree.searchNext pt.tree pt pattern offset ViE.searchChunkSize false cache order 0
+            match res with
+            | some idx =>
+                if idx + n > total then
+                  acc
+                else
+                  let nextOffset := if idx + n > offset then idx + n else offset + 1
+                  loop fuel nextOffset cache' order' (acc.push (idx, idx + n))
+            | none => acc
+    loop (total + 1) 0 Lean.RBMap.empty #[] #[]
 
 def replaceFirstInLine (line : String) (old : String) (new : String) : String :=
   if old.isEmpty then

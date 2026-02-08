@@ -4,21 +4,22 @@ namespace ViE.UI
 open ViE
 
 /-- Find all occurrences of a byte pattern within a byte array. -/
-partial def findAllMatchesBytes (haystack : ByteArray) (needle : ByteArray) : Array (Nat × Nat) :=
+def findAllMatchesBytes (haystack : ByteArray) (needle : ByteArray) : Array (Nat × Nat) := Id.run do
   let n := needle.size
   let h := haystack.size
   if n == 0 || h < n then
-    #[]
-  else
-    let rec matchesAt (i j : Nat) : Bool :=
-      if j == n then true
-      else if haystack[i + j]! == needle[j]! then matchesAt i (j + 1) else false
-    let rec loop (i : Nat) (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
-      if i + n > h then acc
-      else
-        let acc' := if matchesAt i 0 then acc.push (i, i + n) else acc
-        loop (i + 1) acc'
-    loop 0 #[]
+    return #[]
+
+  let limit := h - n + 1
+  let mut out : Array (Nat × Nat) := #[]
+  for i in [0:limit] do
+    let mut matched := true
+    for j in [0:n] do
+      if matched && haystack[i + j]! != needle[j]! then
+        matched := false
+    if matched then
+      out := out.push (i, i + n)
+  return out
 
 def overlapsByteRange (r : Nat × Nat) (byteStart byteEnd : Nat) : Bool :=
   let (s, e) := r

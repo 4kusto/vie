@@ -144,59 +144,73 @@ def EditorState.clampCursor (s : EditorState) : EditorState :=
 def isKeyword (c : Char) : Bool :=
   c.isAlphanum || c == '_'
 
+/-- Upper bound used to guarantee termination for word-movement scans. -/
+def wordMoveFuel (buffer : FileBuffer) : Nat :=
+  max 1 (buffer.table.length + FileBuffer.lineCount buffer + 1)
+
 mutual
-  partial def findNextForward (buffer : FileBuffer) (row : Row) (col : Col) (started : Bool) : Row × Col :=
-    let lineLen := lineDisplayWidth buffer row
-    if lineLen == 0 then
-       (row, 0) -- Stop at empty line
-    else if col.val >= lineLen then
-       -- End of line, wrap to next line
-       if row.val + 1 < FileBuffer.lineCount buffer then
-         let nextRow := row.succ
-         let nextLen := lineDisplayWidth buffer nextRow
-         if nextLen == 0 then
-            (nextRow, 0) -- Stop at empty line
+  def findNextForwardCore (buffer : FileBuffer) (row : Row) (col : Col) (started : Bool) (fuel : Nat) : Row × Col :=
+    match fuel with
+    | 0 => (row, col)
+    | fuel + 1 =>
+      let lineLen := lineDisplayWidth buffer row
+      if lineLen == 0 then
+         (row, 0) -- Stop at empty line
+      else if col.val >= lineLen then
+         -- End of line, wrap to next line
+         if row.val + 1 < FileBuffer.lineCount buffer then
+           let nextRow := row.succ
+           let nextLen := lineDisplayWidth buffer nextRow
+           if nextLen == 0 then
+              (nextRow, 0) -- Stop at empty line
+           else
+              findNextForwardCore buffer nextRow 0 true fuel
          else
-            findNextForward buffer nextRow 0 true
-       else
-         (row, col) -- End of file
-    else
-      let lineStr := lineString buffer row
-      let c := charAtDisplayCol lineStr col
-      let isKw := isKeyword c
-      let isSpace := c.isWhitespace
-      if !started then
-        if isSpace then
-           findNextForward buffer row (nextCol buffer row col) true
-        else
-           findNextWordEndForward buffer row (nextCol buffer row col) isKw
+           (row, col) -- End of file
       else
-         if isSpace then
-            findNextForward buffer row (nextCol buffer row col) started
-         else
-            (row, col) -- Found start of next word
-
-
-
-  partial def findNextWordEndForward (buffer : FileBuffer) (row : Row) (col : Col) (wasTv : Bool) : Row × Col :=
-       let lineLen := lineDisplayWidth buffer row
-       if col.val >= lineLen then
-          if row.val + 1 < FileBuffer.lineCount buffer then
-            findNextForward buffer row.succ 0 true
-          else
-            (row, col)
-       else
-          let lineStr := lineString buffer row
-          let c := charAtDisplayCol lineStr col
-          let isKw := isKeyword c
-          let isSpace := c.isWhitespace
+        let lineStr := lineString buffer row
+        let c := charAtDisplayCol lineStr col
+        let isKw := isKeyword c
+        let isSpace := c.isWhitespace
+        if !started then
           if isSpace then
-             findNextForward buffer row (nextCol buffer row col) true
-          else if isKw != wasTv then
-             (row, col)
+             findNextForwardCore buffer row (nextCol buffer row col) true fuel
           else
-             findNextWordEndForward buffer row (nextCol buffer row col) wasTv
+             findNextWordEndForwardCore buffer row (nextCol buffer row col) isKw fuel
+        else
+           if isSpace then
+              findNextForwardCore buffer row (nextCol buffer row col) started fuel
+           else
+              (row, col) -- Found start of next word
+
+  def findNextWordEndForwardCore (buffer : FileBuffer) (row : Row) (col : Col) (wasTv : Bool) (fuel : Nat) : Row × Col :=
+    match fuel with
+    | 0 => (row, col)
+    | fuel + 1 =>
+      let lineLen := lineDisplayWidth buffer row
+      if col.val >= lineLen then
+        if row.val + 1 < FileBuffer.lineCount buffer then
+          findNextForwardCore buffer row.succ 0 true fuel
+        else
+          (row, col)
+      else
+        let lineStr := lineString buffer row
+        let c := charAtDisplayCol lineStr col
+        let isKw := isKeyword c
+        let isSpace := c.isWhitespace
+        if isSpace then
+           findNextForwardCore buffer row (nextCol buffer row col) true fuel
+        else if isKw != wasTv then
+           (row, col)
+        else
+           findNextWordEndForwardCore buffer row (nextCol buffer row col) wasTv fuel
 end
+
+def findNextForward (buffer : FileBuffer) (row : Row) (col : Col) (started : Bool) : Row × Col :=
+  findNextForwardCore buffer row col started (wordMoveFuel buffer)
+
+def findNextWordEndForward (buffer : FileBuffer) (row : Row) (col : Col) (wasTv : Bool) : Row × Col :=
+  findNextWordEndForwardCore buffer row col wasTv (wordMoveFuel buffer)
 
 /-- Move forward to start of next word (w) -/
 def EditorState.moveWordForward (s : EditorState) : EditorState :=
@@ -234,34 +248,44 @@ def EditorState.moveWordForward (s : EditorState) : EditorState :=
 
 
 mutual
-  partial def findPrevStart (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
-        let lineStr := lineString buffer row
-        let c := charAtDisplayCol lineStr col
-        if c.isWhitespace then
-           if col.val == 0 then
-              if row.val > 0 then
-                 let prevRow := row.pred
-                 let prevLen := lineDisplayWidth buffer prevRow
-                 if prevLen > 0 then findPrevStart buffer prevRow ⟨prevLen - 1⟩ else (prevRow, 0)
-              else (0, 0)
-           else
-              findPrevStart buffer row (prevCol buffer row col)
-        else
-           let isKw := isKeyword c
-           consumeWordBackward buffer row col isKw
+  def findPrevStartCore (buffer : FileBuffer) (row : Row) (col : Col) (fuel : Nat) : Row × Col :=
+    match fuel with
+    | 0 => (row, col)
+    | fuel + 1 =>
+      let lineStr := lineString buffer row
+      let c := charAtDisplayCol lineStr col
+      if c.isWhitespace then
+         if col.val == 0 then
+            if row.val > 0 then
+               let prevRow := row.pred
+               let prevLen := lineDisplayWidth buffer prevRow
+               if prevLen > 0 then findPrevStartCore buffer prevRow ⟨prevLen - 1⟩ fuel else (prevRow, 0)
+            else (0, 0)
+         else
+            findPrevStartCore buffer row (prevCol buffer row col) fuel
+      else
+         let isKw := isKeyword c
+         consumeWordBackwardCore buffer row col isKw fuel
 
-
-    partial def consumeWordBackward (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
-        let lineStr := lineString buffer row
-        let c := charAtDisplayCol lineStr col
-        let isKw := isKeyword c
-        if c.isWhitespace || isKw != wantKw then
-           (row, nextCol buffer row col)
-        else
-           if col.val == 0 then (row, 0)
-           else consumeWordBackward buffer row (prevCol buffer row col) wantKw
-
+  def consumeWordBackwardCore (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) (fuel : Nat) : Row × Col :=
+    match fuel with
+    | 0 => (row, col)
+    | fuel + 1 =>
+      let lineStr := lineString buffer row
+      let c := charAtDisplayCol lineStr col
+      let isKw := isKeyword c
+      if c.isWhitespace || isKw != wantKw then
+         (row, nextCol buffer row col)
+      else
+         if col.val == 0 then (row, 0)
+         else consumeWordBackwardCore buffer row (prevCol buffer row col) wantKw fuel
 end
+
+def findPrevStart (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
+  findPrevStartCore buffer row col (wordMoveFuel buffer)
+
+def consumeWordBackward (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
+  consumeWordBackwardCore buffer row col wantKw (wordMoveFuel buffer)
 
 /-- Move backward to start of previous word (b) -/
 def EditorState.moveWordBackward (s : EditorState) : EditorState :=
@@ -287,36 +311,48 @@ def EditorState.moveWordBackward (s : EditorState) : EditorState :=
 
 
 mutual
-  partial def findNextEnd (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
-    let lineLen := lineDisplayWidth buffer row
-    if col.val >= lineLen then
-       if row.val + 1 < FileBuffer.lineCount buffer then
-         findNextEnd buffer row.succ 0
-       else
-         (row, col)
-    else
-       let lineStr := lineString buffer row
-       let c := charAtDisplayCol lineStr col
-       if c.isWhitespace then
-          findNextEnd buffer row (nextCol buffer row col)
-       else
-          let isKw := isKeyword c
-          consumeWordToEnd buffer row col isKw
-
-     partial def consumeWordToEnd (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
-        let lineLen := lineDisplayWidth buffer row
-        let nextColVal := (nextCol buffer row col).val
-        if nextColVal >= lineLen then
+  def findNextEndCore (buffer : FileBuffer) (row : Row) (col : Col) (fuel : Nat) : Row × Col :=
+    match fuel with
+    | 0 => (row, col)
+    | fuel + 1 =>
+      let lineLen := lineDisplayWidth buffer row
+      if col.val >= lineLen then
+         if row.val + 1 < FileBuffer.lineCount buffer then
+           findNextEndCore buffer row.succ 0 fuel
+         else
            (row, col)
-        else
-           let lineStr := lineString buffer row
-           let nextC := charAtDisplayCol lineStr (nextCol buffer row col)
-           let nextKw := isKeyword nextC
-           if nextC.isWhitespace || nextKw != wantKw then
-              (row, col)
-           else
-              consumeWordToEnd buffer row (nextCol buffer row col) wantKw
+      else
+         let lineStr := lineString buffer row
+         let c := charAtDisplayCol lineStr col
+         if c.isWhitespace then
+            findNextEndCore buffer row (nextCol buffer row col) fuel
+         else
+            let isKw := isKeyword c
+            consumeWordToEndCore buffer row col isKw fuel
+
+  def consumeWordToEndCore (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) (fuel : Nat) : Row × Col :=
+    match fuel with
+    | 0 => (row, col)
+    | fuel + 1 =>
+      let lineLen := lineDisplayWidth buffer row
+      let nextColVal := (nextCol buffer row col).val
+      if nextColVal >= lineLen then
+         (row, col)
+      else
+         let lineStr := lineString buffer row
+         let nextC := charAtDisplayCol lineStr (nextCol buffer row col)
+         let nextKw := isKeyword nextC
+         if nextC.isWhitespace || nextKw != wantKw then
+            (row, col)
+         else
+            consumeWordToEndCore buffer row (nextCol buffer row col) wantKw fuel
 end
+
+def findNextEnd (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
+  findNextEndCore buffer row col (wordMoveFuel buffer)
+
+def consumeWordToEnd (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
+  consumeWordToEndCore buffer row col wantKw (wordMoveFuel buffer)
 
 /-- Move to end of word (e) -/
 def EditorState.moveWordEnd (s : EditorState) : EditorState :=

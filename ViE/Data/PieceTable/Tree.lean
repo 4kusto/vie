@@ -143,38 +143,34 @@ def takeFirstBytes (arr : Array UInt8) (n : Nat) : Array UInt8 :=
 def takeLastBytes (arr : Array UInt8) (n : Nat) : Array UInt8 :=
   if arr.size <= n then arr else arr.extract (arr.size - n) arr.size
 
-partial def buildPrefixBytes (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : Array UInt8 :=
-  let rec loop (i : Nat) (acc : Array UInt8) : Array UInt8 :=
-    if i >= pieces.size || acc.size >= 2 then
-      acc
-    else
-      let p := pieces[i]!
-      let buf := PieceTableHelper.getBuffer pt p.source
-      let slice := buf.extract p.start (p.start + p.length)
-      if slice.size > 0 then
-        let need := 2 - acc.size
-        let take := takeFirstBytes slice.data need
-        loop (i + 1) (acc ++ take)
-      else
-        loop (i + 1) acc
-  loop 0 #[]
+def buildPrefixBytes (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : Array UInt8 := Id.run do
+  let mut i := 0
+  let mut acc : Array UInt8 := #[]
+  while i < pieces.size && acc.size < 2 do
+    let p := pieces[i]!
+    let buf := PieceTableHelper.getBuffer pt p.source
+    let slice := buf.extract p.start (p.start + p.length)
+    if slice.size > 0 then
+      let need := 2 - acc.size
+      let take := takeFirstBytes slice.data need
+      acc := acc ++ take
+    i := i + 1
+  return acc
 
-partial def buildSuffixBytes (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : Array UInt8 :=
-  let rec loop (i : Nat) (acc : Array UInt8) : Array UInt8 :=
-    if i == 0 || acc.size >= 2 then
-      acc
-    else
-      let idx := i - 1
-      let p := pieces[idx]!
-      let buf := PieceTableHelper.getBuffer pt p.source
-      let slice := buf.extract p.start (p.start + p.length)
-      if slice.size > 0 then
-        let need := 2 - acc.size
-        let take := takeLastBytes slice.data need
-        loop idx (take ++ acc)
-      else
-        loop idx acc
-  loop pieces.size #[]
+def buildSuffixBytes (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : Array UInt8 := Id.run do
+  let mut i := pieces.size
+  let mut acc : Array UInt8 := #[]
+  while i > 0 && acc.size < 2 do
+    let idx := i - 1
+    let p := pieces[idx]!
+    let buf := PieceTableHelper.getBuffer pt p.source
+    let slice := buf.extract p.start (p.start + p.length)
+    if slice.size > 0 then
+      let need := 2 - acc.size
+      let take := takeLastBytes slice.data need
+      acc := take ++ acc
+    i := idx
+  return acc
 
 def addBytesToBloom (bloom : ByteArray) (carry : Array UInt8) (bytes : ByteArray) : (ByteArray × Array UInt8) :=
   let arr := carry ++ bytes.data
@@ -293,7 +289,7 @@ def mkInternal (children : Array ViE.PieceTree) : ViE.PieceTree :=
   ViE.PieceTree.internal children s searchMeta
 
 /-- Efficiently concatenate a list of pieces into a tree -/
-partial def fromPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree :=
+def fromPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree :=
   if pieces.isEmpty then ViE.PieceTree.empty
   else if pieces.size <= ViE.NodeCapacity then
     mkLeaf pieces pt
@@ -302,136 +298,170 @@ partial def fromPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.Pi
     let left := fromPieces (pieces.extract 0 mid) pt
     let right := fromPieces (pieces.extract mid pieces.size) pt
     mkInternal #[left, right]
+  termination_by pieces.size
+  decreasing_by
+    · simp_wf
+      have hgt : ViE.NodeCapacity < pieces.size := Nat.lt_of_not_ge (by assumption)
+      have hsize : 0 < pieces.size := Nat.lt_trans (by decide : 0 < ViE.NodeCapacity) hgt
+      have hdiv : pieces.size / 2 < pieces.size := Nat.div_lt_self hsize (by decide : 1 < 2)
+      exact Nat.lt_of_le_of_lt (Nat.min_le_left _ _) hdiv
+    · simp_wf
+      have hgt : ViE.NodeCapacity < pieces.size := Nat.lt_of_not_ge (by assumption)
+      have hsize : 0 < pieces.size := Nat.lt_trans (by decide : 0 < ViE.NodeCapacity) hgt
+      have hge2 : 2 ≤ pieces.size := Nat.le_trans (by decide : 2 ≤ ViE.NodeCapacity) (Nat.le_of_lt hgt)
+      have hhalf : 0 < pieces.size / 2 := Nat.div_pos hge2 (by decide : 0 < 2)
+      exact Nat.sub_lt hsize hhalf
 
-/-- Concatenate two trees while maintaining B+ tree invariants -/
-partial def concat (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTable) : ViE.PieceTree :=
-  match l, r with
-  | ViE.PieceTree.empty, _ => r
-  | _, ViE.PieceTree.empty => l
+/-- Concatenate two trees while maintaining B+ tree invariants. -/
+private def concatCore (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTable) (fuel : Nat) : ViE.PieceTree :=
+  match fuel with
+  | 0 => mkInternal #[l, r]
+  | fuel + 1 =>
+    match l, r with
+    | ViE.PieceTree.empty, _ => r
+    | _, ViE.PieceTree.empty => l
 
-  | ViE.PieceTree.leaf ps1 _ _, ViE.PieceTree.leaf ps2 _ _ =>
-    -- Try to merge the last piece of ps1 with the first piece of ps2
-    if ps1.size > 0 && ps2.size > 0 then
-      let p1 := ps1.back!
-      let p2 := ps2[0]!
-      if p1.source == p2.source && p1.start + p1.length == p2.start then
-        let mergedPiece : ViE.Piece := { p1 with
-          length := p1.length + p2.length,
-          lineBreaks := p1.lineBreaks + p2.lineBreaks,
-          charCount := p1.charCount + p2.charCount
-        }
-        let ps := (ps1.pop).push mergedPiece ++ (ps2.extract 1 ps2.size)
-        if ps.size <= ViE.NodeCapacity then
-          mkLeaf ps pt
-        else
-          let mid := ps.size / 2
-          mkInternal #[mkLeaf (ps.extract 0 mid) pt, mkLeaf (ps.extract mid ps.size) pt]
-      else
-        let ps := ps1 ++ ps2
-        if ps.size <= ViE.NodeCapacity then mkLeaf ps pt
-        else mkInternal #[mkLeaf ps1 pt, mkLeaf ps2 pt]
-    else if ps1.size > 0 then l
-    else r
-
-  | ViE.PieceTree.internal cs1 _ _, ViE.PieceTree.internal cs2 _ _ =>
-    let h1 := height l
-    let h2 := height r
-    if h1 == h2 then
-      -- Merge boundary children
-      let lastChild := cs1.back!
-      let firstChild := cs2[0]!
-      let merged := concat lastChild firstChild pt
-      match merged with
-      | ViE.PieceTree.internal newCS s _ =>
-        if s.height == h1 then
-           -- newCS is at the same level as siblings
-           let combined := (cs1.pop) ++ newCS ++ (cs2.extract 1 cs2.size)
-           if combined.size <= ViE.NodeCapacity then mkInternal combined
-           else
-             let mid := combined.size / 2
-             mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
-        else
-           -- height did not increase, just one child
-           let combined := (cs1.pop).push merged ++ (cs2.extract 1 cs2.size)
-           if combined.size <= ViE.NodeCapacity then mkInternal combined
-           else
-             let mid := combined.size / 2
-             mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
-      | _ =>
-        let combined := (cs1.pop).push merged ++ (cs2.extract 1 cs2.size)
-        if combined.size <= ViE.NodeCapacity then mkInternal combined
-        else
-          let mid := combined.size / 2
-          mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
-    else if h1 > h2 then
-      -- Insert r into l's right side
-      let lastChild := cs1.back!
-      let newLast := concat lastChild r pt
-      match newLast with
-      | ViE.PieceTree.internal newChildren s _ =>
-        if s.height == h1 then
-           -- Split happened at l's level
-           let combined := (cs1.pop) ++ newChildren
-           if combined.size <= ViE.NodeCapacity then mkInternal combined
-           else
-              let mid := combined.size / 2
-              mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
-        else
-           mkInternal ((cs1.pop).push newLast)
-      | _ => mkInternal ((cs1.pop).push newLast)
-    else
-      -- Insert l into r's left side
-      let firstChild := cs2[0]!
-      let newFirst := concat l firstChild pt
-      match newFirst with
-      | ViE.PieceTree.internal newChildren s _ =>
-        if s.height == h2 then
-           let combined := newChildren ++ (cs2.extract 1 cs2.size)
-           if combined.size <= ViE.NodeCapacity then mkInternal combined
-           else
-              let mid := combined.size / 2
-              mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
-        else
-           mkInternal (#[newFirst] ++ (cs2.extract 1 cs2.size))
-      | _ => mkInternal (#[newFirst] ++ (cs2.extract 1 cs2.size))
-
-  -- Mixed types: wrap the smaller one and recurse
-  | ViE.PieceTree.leaf .. , ViE.PieceTree.internal .. => concat (mkInternal #[l]) r pt
-  | ViE.PieceTree.internal .. , ViE.PieceTree.leaf .. => concat l (mkInternal #[r]) pt
-
-/-- Split the tree at a given byte offset -/
-partial def split (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) : (ViE.PieceTree × ViE.PieceTree) :=
-  match t with
-  | ViE.PieceTree.empty => (ViE.PieceTree.empty, ViE.PieceTree.empty)
-  | ViE.PieceTree.leaf pieces _ _ =>
-    let rec findSplitLeaf (i : Nat) (accOffset : Nat) : (ViE.PieceTree × ViE.PieceTree) :=
-      if i >= pieces.size then (t, ViE.PieceTree.empty)
-      else
-        let p := pieces[i]!
-        if offset < accOffset + p.length then
-          let relOffset := offset - accOffset
-          if relOffset == 0 then
-             (mkLeaf (pieces.extract 0 i) pt, mkLeaf (pieces.extract i pieces.size) pt)
+    | ViE.PieceTree.leaf ps1 _ _, ViE.PieceTree.leaf ps2 _ _ =>
+      -- Try to merge the last piece of ps1 with the first piece of ps2
+      if ps1.size > 0 && ps2.size > 0 then
+        let p1 := ps1.back!
+        let p2 := ps2[0]!
+        if p1.source == p2.source && p1.start + p1.length == p2.start then
+          let mergedPiece : ViE.Piece := { p1 with
+            length := p1.length + p2.length,
+            lineBreaks := p1.lineBreaks + p2.lineBreaks,
+            charCount := p1.charCount + p2.charCount
+          }
+          let ps := (ps1.pop).push mergedPiece ++ (ps2.extract 1 ps2.size)
+          if ps.size <= ViE.NodeCapacity then
+            mkLeaf ps pt
           else
-             let (p1, p2) := PieceTableHelper.splitPiece p relOffset pt
-             (mkLeaf ((pieces.extract 0 i).push p1) pt, mkLeaf (#[p2] ++ (pieces.extract (i + 1) pieces.size)) pt)
+            let mid := ps.size / 2
+            mkInternal #[mkLeaf (ps.extract 0 mid) pt, mkLeaf (ps.extract mid ps.size) pt]
         else
-          findSplitLeaf (i + 1) (accOffset + p.length)
-    findSplitLeaf 0 0
-  | ViE.PieceTree.internal children _ _ =>
-    let rec findSplitInternal (i : Nat) (accOffset : Nat) : (ViE.PieceTree × ViE.PieceTree) :=
-      if i >= children.size then (t, ViE.PieceTree.empty)
+          let ps := ps1 ++ ps2
+          if ps.size <= ViE.NodeCapacity then mkLeaf ps pt
+          else mkInternal #[mkLeaf ps1 pt, mkLeaf ps2 pt]
+      else if ps1.size > 0 then l
+      else r
+
+    | ViE.PieceTree.internal cs1 _ _, ViE.PieceTree.internal cs2 _ _ =>
+      let h1 := height l
+      let h2 := height r
+      if h1 == h2 then
+        -- Merge boundary children
+        let lastChild := cs1.back!
+        let firstChild := cs2[0]!
+        let merged := concatCore lastChild firstChild pt fuel
+        match merged with
+        | ViE.PieceTree.internal newCS s _ =>
+          if s.height == h1 then
+             -- newCS is at the same level as siblings
+             let combined := (cs1.pop) ++ newCS ++ (cs2.extract 1 cs2.size)
+             if combined.size <= ViE.NodeCapacity then mkInternal combined
+             else
+               let mid := combined.size / 2
+               mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+          else
+             -- height did not increase, just one child
+             let combined := (cs1.pop).push merged ++ (cs2.extract 1 cs2.size)
+             if combined.size <= ViE.NodeCapacity then mkInternal combined
+             else
+               let mid := combined.size / 2
+               mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+        | _ =>
+          let combined := (cs1.pop).push merged ++ (cs2.extract 1 cs2.size)
+          if combined.size <= ViE.NodeCapacity then mkInternal combined
+          else
+            let mid := combined.size / 2
+            mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+      else if h1 > h2 then
+        -- Insert r into l's right side
+        let lastChild := cs1.back!
+        let newLast := concatCore lastChild r pt fuel
+        match newLast with
+        | ViE.PieceTree.internal newChildren s _ =>
+          if s.height == h1 then
+             -- Split happened at l's level
+             let combined := (cs1.pop) ++ newChildren
+             if combined.size <= ViE.NodeCapacity then mkInternal combined
+             else
+                let mid := combined.size / 2
+                mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+          else
+             mkInternal ((cs1.pop).push newLast)
+        | _ => mkInternal ((cs1.pop).push newLast)
       else
-        let c := children[i]!
-        let cLen := length c
-        if offset < accOffset + cLen then
-          let (l, r) := split c (offset - accOffset) pt
-          let leftSide := mkInternal ((children.extract 0 i).push l)
-          let rightSide := mkInternal (#[r] ++ (children.extract (i + 1) children.size))
-          (leftSide, rightSide)
-        else
-          findSplitInternal (i + 1) (accOffset + cLen)
-    findSplitInternal 0 0
+        -- Insert l into r's left side
+        let firstChild := cs2[0]!
+        let newFirst := concatCore l firstChild pt fuel
+        match newFirst with
+        | ViE.PieceTree.internal newChildren s _ =>
+          if s.height == h2 then
+             let combined := newChildren ++ (cs2.extract 1 cs2.size)
+             if combined.size <= ViE.NodeCapacity then mkInternal combined
+             else
+                let mid := combined.size / 2
+                mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+          else
+             mkInternal (#[newFirst] ++ (cs2.extract 1 cs2.size))
+        | _ => mkInternal (#[newFirst] ++ (cs2.extract 1 cs2.size))
+
+    -- Mixed types: wrap the smaller one and recurse
+    | ViE.PieceTree.leaf .. , ViE.PieceTree.internal .. => concatCore (mkInternal #[l]) r pt fuel
+    | ViE.PieceTree.internal .. , ViE.PieceTree.leaf .. => concatCore l (mkInternal #[r]) pt fuel
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def concat (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTable) : ViE.PieceTree :=
+  let fuel := (length l + length r + 1) * 4 + 16
+  concatCore l r pt fuel
+
+/-- Split the tree at a given byte offset. -/
+private def splitCore (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) (fuel : Nat) : (ViE.PieceTree × ViE.PieceTree) :=
+  match fuel with
+  | 0 => (t, ViE.PieceTree.empty)
+  | fuel + 1 =>
+      match t with
+      | ViE.PieceTree.empty => (ViE.PieceTree.empty, ViE.PieceTree.empty)
+      | ViE.PieceTree.leaf pieces _ _ =>
+          Id.run do
+            let mut i := 0
+            let mut accOffset := 0
+            while i < pieces.size do
+              let p := pieces[i]!
+              if offset < accOffset + p.length then
+                let relOffset := offset - accOffset
+                if relOffset == 0 then
+                  return (mkLeaf (pieces.extract 0 i) pt, mkLeaf (pieces.extract i pieces.size) pt)
+                let (p1, p2) := PieceTableHelper.splitPiece p relOffset pt
+                return (mkLeaf ((pieces.extract 0 i).push p1) pt, mkLeaf (#[p2] ++ (pieces.extract (i + 1) pieces.size)) pt)
+              accOffset := accOffset + p.length
+              i := i + 1
+            return (t, ViE.PieceTree.empty)
+      | ViE.PieceTree.internal children _ _ =>
+          Id.run do
+            let mut i := 0
+            let mut accOffset := 0
+            while i < children.size do
+              let c := children[i]!
+              let cLen := length c
+              if offset < accOffset + cLen then
+                let (l, r) := splitCore c (offset - accOffset) pt fuel
+                let leftSide := mkInternal ((children.extract 0 i).push l)
+                let rightSide := mkInternal (#[r] ++ (children.extract (i + 1) children.size))
+                return (leftSide, rightSide)
+              accOffset := accOffset + cLen
+              i := i + 1
+            return (t, ViE.PieceTree.empty)
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def split (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) : (ViE.PieceTree × ViE.PieceTree) :=
+  let fuel := (length t + 1) * 4 + 16
+  splitCore t offset pt fuel
 
 /-- Delete range from tree -/
 def delete (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : ViE.PieceTree :=
@@ -439,82 +469,118 @@ def delete (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) 
   let (_, r) := split mid_r len pt
   concat l r pt
 
-/-- Get bytes from tree -/
-partial def getBytes (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : ByteArray :=
-  let rec collect (t : ViE.PieceTree) (off : Nat) (l : Nat) (acc : Array ByteArray) : (Array ByteArray × Nat) :=
-    if l == 0 then (acc, 0)
-    else match t with
-      | ViE.PieceTree.empty => (acc, 0)
-      | ViE.PieceTree.leaf pieces _ _ =>
-        let rec scanLeaf (i : Nat) (accOffset : Nat) (currAcc : Array ByteArray) (remain : Nat) : (Array ByteArray × Nat) :=
-          if i >= pieces.size || remain == 0 then (currAcc, l - remain)
-          else
-            let p := pieces[i]!
-            let pLen := p.length
-            if off < accOffset + pLen then
-              let pStart := if off > accOffset then off - accOffset else 0
-              let readLen := min remain (pLen - pStart)
-              let buf := PieceTableHelper.getBuffer pt p.source
-              let slice := buf.extract (p.start + pStart) (p.start + pStart + readLen)
-              scanLeaf (i + 1) (accOffset + pLen) (currAcc.push slice) (remain - readLen)
-            else
-              scanLeaf (i + 1) (accOffset + pLen) currAcc remain
-        scanLeaf 0 0 acc l
-      | ViE.PieceTree.internal children _ _ =>
-        let rec scanInternal (i : Nat) (accOffset : Nat) (currAcc : Array ByteArray) (remain : Nat) : (Array ByteArray × Nat) :=
-          if i >= children.size || remain == 0 then (currAcc, l - remain)
-          else
-            let c := children[i]!
-            let cLen := length c
-            if off < accOffset + cLen then
-              let cStart := if off > accOffset then off - accOffset else 0
-              let (newAcc, readInThisChild) := collect c cStart remain currAcc
-              scanInternal (i + 1) (accOffset + cLen) newAcc (remain - readInThisChild)
-            else
-              scanInternal (i + 1) (accOffset + cLen) currAcc remain
-        scanInternal 0 0 acc l
-  let (chunks, _) := collect t offset len #[]
+/-- Get bytes from tree. -/
+private def getBytesCore (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) (fuel : Nat) : ByteArray :=
+  let rec collect (fuel : Nat) (t : ViE.PieceTree) (off : Nat) (l : Nat) (acc : Array ByteArray) : (Array ByteArray × Nat) :=
+    match fuel with
+    | 0 => (acc, 0)
+    | fuel + 1 =>
+        if l == 0 then (acc, 0)
+        else
+          match t with
+          | ViE.PieceTree.empty => (acc, 0)
+          | ViE.PieceTree.leaf pieces _ _ =>
+              Id.run do
+                let mut i := 0
+                let mut accOffset := 0
+                let mut currAcc := acc
+                let mut remain := l
+                while i < pieces.size && remain > 0 do
+                  let p := pieces[i]!
+                  let pLen := p.length
+                  if off < accOffset + pLen then
+                    let pStart := if off > accOffset then off - accOffset else 0
+                    let readLen := min remain (pLen - pStart)
+                    let buf := PieceTableHelper.getBuffer pt p.source
+                    let slice := buf.extract (p.start + pStart) (p.start + pStart + readLen)
+                    currAcc := currAcc.push slice
+                    remain := remain - readLen
+                  accOffset := accOffset + pLen
+                  i := i + 1
+                return (currAcc, l - remain)
+          | ViE.PieceTree.internal children _ _ =>
+              Id.run do
+                let mut i := 0
+                let mut accOffset := 0
+                let mut currAcc := acc
+                let mut remain := l
+                while i < children.size && remain > 0 do
+                  let c := children[i]!
+                  let cLen := length c
+                  if off < accOffset + cLen then
+                    let cStart := if off > accOffset then off - accOffset else 0
+                    let (newAcc, readInThisChild) := collect fuel c cStart remain currAcc
+                    currAcc := newAcc
+                    remain := remain - readInThisChild
+                  accOffset := accOffset + cLen
+                  i := i + 1
+                return (currAcc, l - remain)
+  let (chunks, _) := collect fuel t offset len #[]
   chunks.foldl (fun (acc : ByteArray) (b : ByteArray) => acc ++ b) (ByteArray.mk #[])
 
+def getBytes (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : ByteArray :=
+  let fuel := (length t + len + 1) * 4 + 32
+  getBytesCore t offset len pt fuel
+
 /-- Get substring from tree -/
-partial def getSubstring (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : String :=
+def getSubstring (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : String :=
   String.fromUTF8! (getBytes t offset len pt)
 
 /-- Find the leaf and relative offset containing the Nth newline -/
-partial def findNthNewlineLeaf (t : ViE.PieceTree) (n : Nat) (pt : ViE.PieceTable) : Option (ViE.Piece × Nat × Nat) :=
-  let rec scan (t : ViE.PieceTree) (n : Nat) (accOffset : Nat) : Option (ViE.Piece × Nat × Nat) :=
-    match t with
-    | ViE.PieceTree.empty => none
-    | ViE.PieceTree.leaf pieces _ _ =>
-      let rec findInPieces (i : Nat) (currN : Nat) (currOff : Nat) : Option (ViE.Piece × Nat × Nat) :=
-        if i >= pieces.size then none
-        else
-          let p := pieces[i]!
-          if currN < p.lineBreaks then
-            let buf := PieceTableHelper.getBuffer pt p.source
-            let rec findOffset (j : Nat) (targetN : Nat) : Nat :=
-              if j >= p.length then p.length
-              else if buf[p.start + j]! == 10 then
-                if targetN == 0 then j + 1
-                else findOffset (j + 1) (targetN - 1)
-              else findOffset (j + 1) targetN
-            let relOffset := findOffset 0 currN
-            some (p, currOff, relOffset)
-          else
-            findInPieces (i + 1) (currN - p.lineBreaks) (currOff + p.length)
-      findInPieces 0 n accOffset
-    | ViE.PieceTree.internal children _ _ =>
-      let rec findInChildren (i : Nat) (currN : Nat) (currOff : Nat) : Option (ViE.Piece × Nat × Nat) :=
-        if i >= children.size then none
-        else
-          let child := children[i]!
-          let childLines := lineBreaks child
-          if currN < childLines then
-            scan child currN currOff
-          else
-            findInChildren (i + 1) (currN - childLines) (currOff + length child)
-      findInChildren 0 n accOffset
-  scan t n 0
+private def findNthNewlineLeafCore (t : ViE.PieceTree) (n : Nat) (pt : ViE.PieceTable) (accOffset : Nat) (fuel : Nat)
+  : Option (ViE.Piece × Nat × Nat) :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      match t with
+      | ViE.PieceTree.empty => none
+      | ViE.PieceTree.leaf pieces _ _ =>
+          Id.run do
+            let mut i := 0
+            let mut currN := n
+            let mut currOff := accOffset
+            while i < pieces.size do
+              let p := pieces[i]!
+              if currN < p.lineBreaks then
+                let buf := PieceTableHelper.getBuffer pt p.source
+                let mut j := 0
+                let mut targetN := currN
+                let mut relOffset := p.length
+                let mut done := false
+                while j < p.length && !done do
+                  if buf[p.start + j]! == 10 then
+                    if targetN == 0 then
+                      relOffset := j + 1
+                      done := true
+                    else
+                      targetN := targetN - 1
+                  j := j + 1
+                return some (p, currOff, relOffset)
+              currN := currN - p.lineBreaks
+              currOff := currOff + p.length
+              i := i + 1
+            return none
+      | ViE.PieceTree.internal children _ _ =>
+          Id.run do
+            let mut i := 0
+            let mut currN := n
+            let mut currOff := accOffset
+            while i < children.size do
+              let child := children[i]!
+              let childLines := lineBreaks child
+              if currN < childLines then
+                return findNthNewlineLeafCore child currN pt currOff fuel
+              currN := currN - childLines
+              currOff := currOff + length child
+              i := i + 1
+            return none
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def findNthNewlineLeaf (t : ViE.PieceTree) (n : Nat) (pt : ViE.PieceTable) : Option (ViE.Piece × Nat × Nat) :=
+  let fuel := (length t + lineBreaks t + 1) * 4 + 16
+  findNthNewlineLeafCore t n pt 0 fuel
 
 /-- Get range of a line in byte offsets -/
 def getLineRange (t : ViE.PieceTree) (lineIdx : Nat) (pt : ViE.PieceTable) : Option (Nat × Nat) :=
@@ -544,102 +610,173 @@ def getLineLength (t : ViE.PieceTree) (lineIdx : Nat) (pt : ViE.PieceTable) : Op
   | some (_, len) => some len
   | none => none
 
-partial def maximalSuffixLoop (x : ByteArray) (useLe : Bool) (m ms j k p : Int) : (Int × Int) :=
-  if j + k >= m then
-    (ms, p)
-  else
-    let a := x[Int.toNat (j + k)]!
-    let b := x[Int.toNat (ms + k)]!
-    if useLe then
-      if a < b then
-        maximalSuffixLoop x useLe m ms (j + k) 1 (j + k - ms)
-      else if a == b then
-        if k != p then
-          maximalSuffixLoop x useLe m ms j (k + 1) p
-        else
-          maximalSuffixLoop x useLe m ms (j + p) 1 p
+private def maximalSuffixLoopCore (x : ByteArray) (useLe : Bool) (m ms j k p : Int) (fuel : Nat) : (Int × Int) :=
+  match fuel with
+  | 0 => (ms, p)
+  | fuel + 1 =>
+      if j + k >= m then
+        (ms, p)
       else
-        maximalSuffixLoop x useLe m j (j + 1) 1 1
-    else
-      if a > b then
-        maximalSuffixLoop x useLe m ms (j + k) 1 (j + k - ms)
-      else if a == b then
-        if k != p then
-          maximalSuffixLoop x useLe m ms j (k + 1) p
+        let a := x[Int.toNat (j + k)]!
+        let b := x[Int.toNat (ms + k)]!
+        if useLe then
+          if a < b then
+            maximalSuffixLoopCore x useLe m ms (j + k) 1 (j + k - ms) fuel
+          else if a == b then
+            if k != p then
+              maximalSuffixLoopCore x useLe m ms j (k + 1) p fuel
+            else
+              maximalSuffixLoopCore x useLe m ms (j + p) 1 p fuel
+          else
+            maximalSuffixLoopCore x useLe m j (j + 1) 1 1 fuel
         else
-          maximalSuffixLoop x useLe m ms (j + p) 1 p
-      else
-        maximalSuffixLoop x useLe m j (j + 1) 1 1
+          if a > b then
+            maximalSuffixLoopCore x useLe m ms (j + k) 1 (j + k - ms) fuel
+          else if a == b then
+            if k != p then
+              maximalSuffixLoopCore x useLe m ms j (k + 1) p fuel
+            else
+              maximalSuffixLoopCore x useLe m ms (j + p) 1 p fuel
+          else
+            maximalSuffixLoopCore x useLe m j (j + 1) 1 1 fuel
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def maximalSuffixLoop (x : ByteArray) (useLe : Bool) (m ms j k p : Int) : (Int × Int) :=
+  let mNat := Int.toNat m
+  let fuel := (mNat + 1) * (mNat + 1) + 1
+  maximalSuffixLoopCore x useLe m ms j k p fuel
 
 def maximalSuffix (x : ByteArray) (useLe : Bool) : (Int × Int) :=
   let m : Int := x.size
   maximalSuffixLoop x useLe m (-1) 0 1 1
 
-partial def twoWayForward1 (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) : Int :=
-  if j >= n then
-    j
-  else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
-    twoWayForward1 haystack needle i n (j + 1)
-  else
-    j
-
-partial def twoWayBackward1 (haystack needle : ByteArray) (i : Nat) (mem : Int) (j : Int) : Int :=
-  if j <= mem then
-    j
-  else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
-    twoWayBackward1 haystack needle i mem (j - 1)
-  else
-    j
-
-partial def twoWayForward2 (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) : Int :=
-  if j >= n then
-    j
-  else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
-    twoWayForward2 haystack needle i n (j + 1)
-  else
-    j
-
-partial def twoWayBackward2 (haystack needle : ByteArray) (i : Nat) (j : Int) : Int :=
-  if j < 0 then
-    j
-  else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
-    twoWayBackward2 haystack needle i (j - 1)
-  else
-    j
-
-partial def twoWayShortLoop (haystack needle : ByteArray) (start maxStart msNat pNat n : Nat) (i : Nat) (mem : Int) : Option Nat :=
-  if i > maxStart then
-    none
-  else
-    let j0 := max (Int.ofNat msNat) mem + 1
-    let j := twoWayForward1 haystack needle i n j0
-    if j >= n then
-      let j2 := twoWayBackward1 haystack needle i mem (Int.ofNat msNat)
-      if j2 <= mem then
-        some i
+private def twoWayForward1Core (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) (fuel : Nat) : Int :=
+  match fuel with
+  | 0 => j
+  | fuel + 1 =>
+      if j >= n then
+        j
+      else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
+        twoWayForward1Core haystack needle i n (j + 1) fuel
       else
-        let nextI := i + pNat
-        let nextMem := Int.ofNat (n - pNat - 1)
-        twoWayShortLoop haystack needle start maxStart msNat pNat n nextI nextMem
-    else
-      let shift := Int.toNat (j - Int.ofNat msNat)
-      twoWayShortLoop haystack needle start maxStart msNat pNat n (i + shift) (-1)
+        j
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
 
-partial def twoWayLongLoop (haystack needle : ByteArray) (start maxStart msNat pNat n : Nat) (i : Nat) : Option Nat :=
-  if i > maxStart then
-    none
-  else
-    let j := twoWayForward2 haystack needle i n (Int.ofNat (msNat + 1))
-    if j >= n then
-      let j2 := twoWayBackward2 haystack needle i (Int.ofNat msNat)
-      if j2 < 0 then
-        some i
+def twoWayForward1 (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) : Int :=
+  let fuel := Int.toNat (Int.ofNat n - j) + 1
+  twoWayForward1Core haystack needle i n j fuel
+
+private def twoWayBackward1Core (haystack needle : ByteArray) (i : Nat) (mem : Int) (j : Int) (fuel : Nat) : Int :=
+  match fuel with
+  | 0 => j
+  | fuel + 1 =>
+      if j <= mem then
+        j
+      else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
+        twoWayBackward1Core haystack needle i mem (j - 1) fuel
       else
-        let nextI := i + pNat
-        twoWayLongLoop haystack needle start maxStart msNat pNat n nextI
-    else
-      let shift := Int.toNat (j - Int.ofNat msNat)
-      twoWayLongLoop haystack needle start maxStart msNat pNat n (i + shift)
+        j
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def twoWayBackward1 (haystack needle : ByteArray) (i : Nat) (mem : Int) (j : Int) : Int :=
+  let fuel := Int.toNat (j - mem) + 1
+  twoWayBackward1Core haystack needle i mem j fuel
+
+private def twoWayForward2Core (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) (fuel : Nat) : Int :=
+  match fuel with
+  | 0 => j
+  | fuel + 1 =>
+      if j >= n then
+        j
+      else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
+        twoWayForward2Core haystack needle i n (j + 1) fuel
+      else
+        j
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def twoWayForward2 (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) : Int :=
+  let fuel := Int.toNat (Int.ofNat n - j) + 1
+  twoWayForward2Core haystack needle i n j fuel
+
+private def twoWayBackward2Core (haystack needle : ByteArray) (i : Nat) (j : Int) (fuel : Nat) : Int :=
+  match fuel with
+  | 0 => j
+  | fuel + 1 =>
+      if j < 0 then
+        j
+      else if haystack[i + Int.toNat j]! == needle[Int.toNat j]! then
+        twoWayBackward2Core haystack needle i (j - 1) fuel
+      else
+        j
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def twoWayBackward2 (haystack needle : ByteArray) (i : Nat) (j : Int) : Int :=
+  let fuel := Int.toNat (j + 1) + 1
+  twoWayBackward2Core haystack needle i j fuel
+
+private def twoWayShortLoopCore (haystack needle : ByteArray) (start maxStart msNat pNat n : Nat) (i : Nat) (mem : Int) (fuel : Nat) : Option Nat :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      if i > maxStart then
+        none
+      else
+        let j0 := max (Int.ofNat msNat) mem + 1
+        let j := twoWayForward1 haystack needle i n j0
+        if j >= n then
+          let j2 := twoWayBackward1 haystack needle i mem (Int.ofNat msNat)
+          if j2 <= mem then
+            some i
+          else
+            let nextI := i + pNat
+            let nextMem := Int.ofNat (n - pNat - 1)
+            twoWayShortLoopCore haystack needle start maxStart msNat pNat n nextI nextMem fuel
+        else
+          let shift := Int.toNat (j - Int.ofNat msNat)
+          twoWayShortLoopCore haystack needle start maxStart msNat pNat n (i + shift) (-1) fuel
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def twoWayShortLoop (haystack needle : ByteArray) (start maxStart msNat pNat n : Nat) (i : Nat) (mem : Int) : Option Nat :=
+  let fuel := if start <= maxStart then maxStart - start + 2 else 1
+  twoWayShortLoopCore haystack needle start maxStart msNat pNat n i mem fuel
+
+private def twoWayLongLoopCore (haystack needle : ByteArray) (start maxStart msNat pNat n : Nat) (i : Nat) (fuel : Nat) : Option Nat :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      if i > maxStart then
+        none
+      else
+        let j := twoWayForward2 haystack needle i n (Int.ofNat (msNat + 1))
+        if j >= n then
+          let j2 := twoWayBackward2 haystack needle i (Int.ofNat msNat)
+          if j2 < 0 then
+            some i
+          else
+            let nextI := i + pNat
+            twoWayLongLoopCore haystack needle start maxStart msNat pNat n nextI fuel
+        else
+          let shift := Int.toNat (j - Int.ofNat msNat)
+          twoWayLongLoopCore haystack needle start maxStart msNat pNat n (i + shift) fuel
+  termination_by fuel
+  decreasing_by
+    all_goals exact Nat.lt_succ_self _
+
+def twoWayLongLoop (haystack needle : ByteArray) (start maxStart msNat pNat n : Nat) (i : Nat) : Option Nat :=
+  let fuel := if start <= maxStart then maxStart - start + 2 else 1
+  twoWayLongLoopCore haystack needle start maxStart msNat pNat n i fuel
 
 def twoWaySearch (haystack : ByteArray) (needle : ByteArray) (start : Nat) : Option Nat :=
   let n := needle.size
@@ -669,10 +806,10 @@ def twoWaySearch (haystack : ByteArray) (needle : ByteArray) (start : Nat) : Opt
     else
       twoWayLongLoop haystack needle start maxStart msNat pNat n start
 
-partial def findPatternInBytes (haystack : ByteArray) (needle : ByteArray) (start : Nat) : Option Nat :=
+def findPatternInBytes (haystack : ByteArray) (needle : ByteArray) (start : Nat) : Option Nat :=
   twoWaySearch haystack needle start
 
-partial def findLastPatternInBytes (haystack : ByteArray) (needle : ByteArray) : Option Nat :=
+def findLastPatternInBytes (haystack : ByteArray) (needle : ByteArray) : Option Nat :=
   let n := needle.size
   let h := haystack.size
   if n == 0 then
@@ -681,19 +818,22 @@ partial def findLastPatternInBytes (haystack : ByteArray) (needle : ByteArray) :
     none
   else
     let maxStart := h - n
-    let rec loop (i : Nat) (last : Option Nat) : Option Nat :=
-      if i > maxStart then last
-      else
-        match findPatternInBytes haystack needle i with
-        | some idx =>
-            if idx > maxStart then last
-            else loop (idx + 1) (some idx)
-        | none => last
-    loop 0 none
+    let rec loop (i : Nat) (last : Option Nat) (fuel : Nat) : Option Nat :=
+      match fuel with
+      | 0 => last
+      | fuel + 1 =>
+          if i > maxStart then last
+          else
+            match findPatternInBytes haystack needle i with
+            | some idx =>
+                if idx > maxStart then last
+                else loop (idx + 1) (some idx) fuel
+            | none => last
+    loop 0 none (maxStart + 1)
 
 /-- Search forward for a byte pattern from a given offset -/
-partial def searchNext (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startOffset : Nat) (chunkSize : Nat)
-  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (_cacheMax : Nat)
+private def searchNextCore (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startOffset : Nat) (chunkSize : Nat)
+  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (_cacheMax : Nat) (fuel : Nat)
   : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
   if pattern.size == 0 then
     (none, cache, order)
@@ -701,80 +841,90 @@ partial def searchNext (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : Byte
     let total := length t
     if startOffset >= total then
       (none, cache, order)
+    else if pattern.size < 3 || !useBloom then
+      let chunkLen := max chunkSize pattern.size
+      let overlap := pattern.size - 1
+      let found := Id.run do
+        let mut offset := startOffset
+        while offset < total do
+          let remaining := total - offset
+          let readLen := min chunkLen remaining
+          if readLen < pattern.size then
+            return none
+          let bytes := getBytes t offset readLen pt
+          match findPatternInBytes bytes pattern 0 with
+          | some idx => return some (offset + idx)
+          | none =>
+              if offset + readLen >= total then
+                return none
+              offset := offset + (readLen - overlap)
+        return none
+      (found, cache, order)
     else
-      if pattern.size < 3 || !useBloom then
-        let chunkLen := max chunkSize pattern.size
-        let overlap := pattern.size - 1
-        let rec loop (offset : Nat) : Option Nat :=
-          if offset >= total then none
-          else
-            let remaining := total - offset
-            let readLen := min chunkLen remaining
-            if readLen < pattern.size then
-              none
+      let hashes := patternTrigramHashes pattern
+      let overlap := pattern.size - 1
+      let rec searchNode (node : ViE.PieceTree) (baseOffset : Nat)
+        (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (fuelN : Nat)
+        : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
+        match fuelN with
+        | 0 => (none, cache, order)
+        | fuelN + 1 =>
+            if baseOffset + length node <= startOffset then
+              (none, cache, order)
             else
-              let bytes := getBytes t offset readLen pt
-              match findPatternInBytes bytes pattern 0 with
-              | some idx => some (offset + idx)
-              | none =>
-                if offset + readLen >= total then none
-                else
-                  let nextOffset := offset + (readLen - overlap)
-                  loop nextOffset
-        (loop startOffset, cache, order)
-      else
-        let hashes := patternTrigramHashes pattern
-        let overlap := pattern.size - 1
-        let rec searchNode (node : ViE.PieceTree) (baseOffset : Nat)
-          (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
-          : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-          if baseOffset + length node <= startOffset then
-            (none, cache, order)
-          else
-            match node with
-            | ViE.PieceTree.empty => (none, cache, order)
-            | ViE.PieceTree.leaf _ _ m =>
-                let relStart := if startOffset > baseOffset then startOffset - baseOffset else 0
-                let remain := length node - relStart
-                let globalStart := baseOffset + relStart
-                let available := total - globalStart
-                let readLen := min (remain + overlap) available
-                if readLen < pattern.size then
-                  (none, cache, order)
-                else
-                  let crossesBoundary := readLen > remain
-                  if !crossesBoundary && !bloomMayContain m.bits hashes then
+              match node with
+              | ViE.PieceTree.empty => (none, cache, order)
+              | ViE.PieceTree.leaf _ _ m =>
+                  let relStart := if startOffset > baseOffset then startOffset - baseOffset else 0
+                  let remain := length node - relStart
+                  let globalStart := baseOffset + relStart
+                  let available := total - globalStart
+                  let readLen := min (remain + overlap) available
+                  if readLen < pattern.size then
                     (none, cache, order)
                   else
-                    let bytes := getBytes t globalStart readLen pt
-                    match findPatternInBytes bytes pattern 0 with
-                    | some idx => (some (globalStart + idx), cache, order)
-                    | none => (none, cache, order)
-            | ViE.PieceTree.internal children _ m =>
-                if !bloomMayContain m.bits hashes then
-                  (none, cache, order)
-                else
-                  let rec loop (i : Nat) (offset : Nat)
-                    (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
-                    : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-                    if i >= children.size then
+                    let crossesBoundary := readLen > remain
+                    if !crossesBoundary && !bloomMayContain m.bits hashes then
                       (none, cache, order)
                     else
-                      let child := children[i]!
-                      let childLen := length child
-                      let childEnd := offset + childLen
-                      if childEnd <= startOffset then
-                        loop (i + 1) childEnd cache order
-                      else
-                        match searchNode child offset cache order with
-                        | (some res, cache, order) => (some res, cache, order)
-                        | (none, cache, order) => loop (i + 1) childEnd cache order
-                  loop 0 baseOffset cache order
-        searchNode t 0 cache order
+                      let bytes := getBytes t globalStart readLen pt
+                      match findPatternInBytes bytes pattern 0 with
+                      | some idx => (some (globalStart + idx), cache, order)
+                      | none => (none, cache, order)
+              | ViE.PieceTree.internal children _ m =>
+                  if !bloomMayContain m.bits hashes then
+                    (none, cache, order)
+                  else
+                    Id.run do
+                      let mut i := 0
+                      let mut offset := baseOffset
+                      let mut cacheAcc := cache
+                      let mut orderAcc := order
+                      while i < children.size do
+                        let child := children[i]!
+                        let childLen := length child
+                        let childEnd := offset + childLen
+                        if childEnd > startOffset then
+                          let (res, cache', order') := searchNode child offset cacheAcc orderAcc fuelN
+                          cacheAcc := cache'
+                          orderAcc := order'
+                          match res with
+                          | some _ => return (res, cacheAcc, orderAcc)
+                          | none => pure ()
+                        offset := childEnd
+                        i := i + 1
+                      return (none, cacheAcc, orderAcc)
+      searchNode t 0 cache order fuel
+
+def searchNext (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startOffset : Nat) (chunkSize : Nat)
+  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (cacheMax : Nat)
+  : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
+  let fuel := (length t + pattern.size + 1) * 8 + 64
+  searchNextCore t pt pattern startOffset chunkSize useBloom cache order cacheMax fuel
 
 /-- Search backward for a byte pattern ending before startExclusive -/
-partial def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startExclusive : Nat) (chunkSize : Nat)
-  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (_cacheMax : Nat)
+private def searchPrevCore (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startExclusive : Nat) (chunkSize : Nat)
+  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (_cacheMax : Nat) (fuel : Nat)
   : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
   if pattern.size == 0 then
     (none, cache, order)
@@ -786,79 +936,98 @@ partial def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : Byte
     else if pattern.size < 3 || !useBloom then
       let chunkLen := max chunkSize pattern.size
       let overlap := pattern.size - 1
-      let rec loop (endOffset : Nat) : Option Nat :=
-        if endOffset == 0 then none
-        else
+      let found := Id.run do
+        let mut endOffset := end0
+        while endOffset > 0 do
           let start := if endOffset > chunkLen then endOffset - chunkLen else 0
           let readLen := endOffset - start
           if readLen < pattern.size then
-            if start == 0 then none else loop (start + overlap)
+            if start == 0 then
+              return none
+            endOffset := start + overlap
           else
             let bytes := getBytes t start readLen pt
             match findLastPatternInBytes bytes pattern with
             | some idx =>
                 let pos := start + idx
-                if pos < endOffset then some pos else none
+                if pos < endOffset then
+                  return some pos
+                return none
             | none =>
-                if start == 0 then none else loop (start + overlap)
-      (loop end0, cache, order)
+                if start == 0 then
+                  return none
+                endOffset := start + overlap
+        return none
+      (found, cache, order)
     else
       let hashes := patternTrigramHashes pattern
       let overlap := pattern.size - 1
       let rec searchNode (node : ViE.PieceTree) (baseOffset : Nat)
-        (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
+        (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (fuelN : Nat)
         : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-        if baseOffset >= end0 then
-          (none, cache, order)
-        else
-          match node with
-          | ViE.PieceTree.empty => (none, cache, order)
-          | ViE.PieceTree.leaf _ _ m =>
-              let relEnd := min (end0 - baseOffset) (length node)
-              let globalEnd := baseOffset + relEnd
-              let globalStart := if baseOffset > overlap then baseOffset - overlap else 0
-              let readLen := globalEnd - globalStart
-              if readLen < pattern.size then
-                (none, cache, order)
-              else
-                let crossesBoundary := globalStart < baseOffset
-                if !crossesBoundary && !bloomMayContain m.bits hashes then
-                  (none, cache, order)
-                else
-                  let bytes := getBytes t globalStart readLen pt
-                  match findLastPatternInBytes bytes pattern with
-                  | some idx =>
-                      let pos := globalStart + idx
-                      if pos < end0 then (some pos, cache, order) else (none, cache, order)
-                  | none => (none, cache, order)
-          | ViE.PieceTree.internal children _ m =>
-              if !bloomMayContain m.bits hashes then
-                (none, cache, order)
-              else
-                let spans : Array (ViE.PieceTree × Nat) := Id.run do
-                  let mut acc : Array (ViE.PieceTree × Nat) := #[]
-                  let mut offset := baseOffset
-                  for child in children do
-                    acc := acc.push (child, offset)
-                    offset := offset + length child
-                  return acc
-                let rec loop (i : Nat)
-                  (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat)
-                  : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-                  if i >= spans.size then
+        match fuelN with
+        | 0 => (none, cache, order)
+        | fuelN + 1 =>
+            if baseOffset >= end0 then
+              (none, cache, order)
+            else
+              match node with
+              | ViE.PieceTree.empty => (none, cache, order)
+              | ViE.PieceTree.leaf _ _ m =>
+                  let relEnd := min (end0 - baseOffset) (length node)
+                  let globalEnd := baseOffset + relEnd
+                  let globalStart := if baseOffset > overlap then baseOffset - overlap else 0
+                  let readLen := globalEnd - globalStart
+                  if readLen < pattern.size then
                     (none, cache, order)
                   else
-                    let j := spans.size - 1 - i
-                    let (child, childOffset) := spans[j]!
-                    if childOffset >= end0 then
-                      loop (i + 1) cache order
+                    let crossesBoundary := globalStart < baseOffset
+                    if !crossesBoundary && !bloomMayContain m.bits hashes then
+                      (none, cache, order)
                     else
-                      match searchNode child childOffset cache order with
-                      | (some res, cache, order) =>
-                          if res < end0 then (some res, cache, order) else loop (i + 1) cache order
-                      | (none, cache, order) => loop (i + 1) cache order
-                loop 0 cache order
-      searchNode t 0 cache order
+                      let bytes := getBytes t globalStart readLen pt
+                      match findLastPatternInBytes bytes pattern with
+                      | some idx =>
+                          let pos := globalStart + idx
+                          if pos < end0 then (some pos, cache, order) else (none, cache, order)
+                      | none => (none, cache, order)
+              | ViE.PieceTree.internal children _ m =>
+                  if !bloomMayContain m.bits hashes then
+                    (none, cache, order)
+                  else
+                    let spans : Array (ViE.PieceTree × Nat) := Id.run do
+                      let mut acc : Array (ViE.PieceTree × Nat) := #[]
+                      let mut offset := baseOffset
+                      for child in children do
+                        acc := acc.push (child, offset)
+                        offset := offset + length child
+                      return acc
+                    Id.run do
+                      let mut i := 0
+                      let mut cacheAcc := cache
+                      let mut orderAcc := order
+                      while i < spans.size do
+                        let j := spans.size - 1 - i
+                        let (child, childOffset) := spans[j]!
+                        if childOffset < end0 then
+                          let (res, cache', order') := searchNode child childOffset cacheAcc orderAcc fuelN
+                          cacheAcc := cache'
+                          orderAcc := order'
+                          match res with
+                          | some v =>
+                              if v < end0 then
+                                return (some v, cacheAcc, orderAcc)
+                              pure ()
+                          | none => pure ()
+                        i := i + 1
+                      return (none, cacheAcc, orderAcc)
+      searchNode t 0 cache order fuel
+
+def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (startExclusive : Nat) (chunkSize : Nat)
+  (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (cacheMax : Nat)
+  : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
+  let fuel := (length t + pattern.size + 1) * 8 + 64
+  searchPrevCore t pt pattern startExclusive chunkSize useBloom cache order cacheMax fuel
 
 end PieceTree
 

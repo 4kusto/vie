@@ -109,7 +109,7 @@ def parsePositiveNat (s : String) : Option Nat :=
   | some n => if n > 0 then some n else none
   | none => none
 
-partial def parseFloatArgs
+def parseFloatArgs
   (args : List String)
   (title : String)
   (maxWidth : Nat)

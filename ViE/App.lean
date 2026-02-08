@@ -91,58 +91,60 @@ def buildRestoredWorkspace (settings : EditorConfig) (workspacePath : Option Str
   }
 
 /-- Main event loop. -/
-partial def loop (config : Config) (state : EditorState) : IO Unit := do
-  -- Only render if state is dirty
-  let state ← if state.dirty then
-    ViE.UI.render state
-  else
-    pure state
-
-  -- Reset dirty flag after render (or if it was already clean, keep it clean)
-  let state := { state with dirty := false }
-
-  let currentTime ← IO.monoMsNow
-  let c ← ViE.Terminal.readKey
-
-  -- Update window size
-  let (rows, cols) ← ViE.Terminal.getWindowSize
-  let resized := rows != state.windowHeight || cols != state.windowWidth
-  let state := { state with windowHeight := rows, windowWidth := cols, dirty := state.dirty || resized }
-
-  -- Handle the case where readKey returns None (no input available)
-  match c with
-  | none =>
-    -- Check for timeout
-    let (stateAfterTimeout, keys) := ViE.checkTimeout state currentTime
-    let stateAfterTimeout := ViE.maybeRunIncrementalSearch stateAfterTimeout currentTime
-    if keys.isEmpty then
-       -- No input and no timeout events, sleep briefly to avoid busy loop
-       IO.sleep 10 -- 10ms
-       loop config stateAfterTimeout
+def loop (config : Config) (state0 : EditorState) : IO Unit := do
+  let mut state := state0
+  let mut quit := false
+  while !quit do
+    -- Only render if state is dirty
+    state ← if state.dirty then
+      ViE.UI.render state
     else
-       -- Process timeout keys (e.g. flushed Esc)
-       let mut finalState := stateAfterTimeout
-       for key in keys do
-         finalState ← ViE.update config finalState key
+      pure state
 
-       if finalState.shouldQuit then
-         return ()
+    -- Reset dirty flag after render (or if it was already clean, keep it clean)
+    state := { state with dirty := false }
 
-       loop config { finalState with dirty := true }
+    let currentTime ← IO.monoMsNow
+    let c ← ViE.Terminal.readKey
 
-  | some ch =>
-    -- Parse the character into keys using the new parseKey function
-    let (stateAfterParse, keys) := ViE.parseKey state ch currentTime
+    -- Update window size
+    let (rows, cols) ← ViE.Terminal.getWindowSize
+    let resized := rows != state.windowHeight || cols != state.windowWidth
+    state := { state with windowHeight := rows, windowWidth := cols, dirty := state.dirty || resized }
 
-    -- Process all returned keys
-    let mut finalState := stateAfterParse
-    for key in keys do
-      finalState ← ViE.update config finalState key
+    -- Handle the case where readKey returns None (no input available)
+    match c with
+    | none =>
+      -- Check for timeout
+      let (stateAfterTimeout, keys) := ViE.checkTimeout state currentTime
+      let stateAfterTimeout := ViE.maybeRunIncrementalSearch stateAfterTimeout currentTime
+      if keys.isEmpty then
+         -- No input and no timeout events, sleep briefly to avoid busy loop
+         IO.sleep 10 -- 10ms
+         state := stateAfterTimeout
+      else
+         -- Process timeout keys (e.g. flushed Esc)
+         let mut finalState := stateAfterTimeout
+         for key in keys do
+           finalState ← ViE.update config finalState key
+         if finalState.shouldQuit then
+           quit := true
+         else
+           state := { finalState with dirty := true }
 
-    if finalState.shouldQuit then
-      return ()
+    | some ch =>
+      -- Parse the character into keys using the new parseKey function
+      let (stateAfterParse, keys) := ViE.parseKey state ch currentTime
 
-    loop config { finalState with dirty := true }
+      -- Process all returned keys
+      let mut finalState := stateAfterParse
+      for key in keys do
+        finalState ← ViE.update config finalState key
+
+      if finalState.shouldQuit then
+        quit := true
+      else
+        state := { finalState with dirty := true }
 
 /-- Entry point for the editor.
     Accepts a configuration and command line arguments. -/
