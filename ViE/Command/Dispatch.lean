@@ -151,7 +151,7 @@ def execGlobal (cmd : String) (state : EditorState) : EditorState :=
       else
         let buf := state.getActiveBuffer
         let cursor := state.getCursor
-        let cursorOffset := ViE.getOffsetFromPointInBuffer buf cursor.row cursor.col |>.getD 0
+        let cursorOffset := ViE.getOffsetFromPointInBufferWithTabStop buf cursor.row cursor.col state.config.tabStop |>.getD 0
         let patBytes := pat.toUTF8
         let lineCount := buf.lineCount
         let matchingRows : Array Nat := Id.run do
@@ -208,7 +208,7 @@ def execSubstitute (cmd : String) (state : EditorState) : EditorState :=
         let doGlobal := flags.contains 'g'
         let buf := state.getActiveBuffer
         let cursor := state.getCursor
-        let cursorOffset := ViE.getOffsetFromPointInBuffer buf cursor.row cursor.col |>.getD 0
+        let cursorOffset := ViE.getOffsetFromPointInBufferWithTabStop buf cursor.row cursor.col state.config.tabStop |>.getD 0
         let patBytes := old.toUTF8
         let matches1 :=
           if isGlobal then

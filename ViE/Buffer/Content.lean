@@ -1,6 +1,7 @@
 import Lean
 import ViE.Types
 import ViE.Basic
+import ViE.State.Config
 import ViE.Data.PieceTable
 import ViE.Unicode
 
@@ -44,15 +45,15 @@ def getPointFromOffsetInBufferWithTabStop (buffer : FileBuffer) (offset tabStop 
 
 /-- Get byte offset from Row/Col (display column) using default tab stop. -/
 def getOffsetFromPointInBuffer (buffer : FileBuffer) (row : Row) (col : Col) : Option Nat :=
-  getOffsetFromPointInBufferWithTabStop buffer row col 4
+  getOffsetFromPointInBufferWithTabStop buffer row col defaultConfig.tabStop
 
 /-- Get line length from FileBuffer (delegates to PieceTable) using default tab stop. -/
 def getLineLengthFromBuffer (buffer : FileBuffer) (n : Row) : Option Nat :=
-  getLineLengthFromBufferWithTabStop buffer n 4
+  getLineLengthFromBufferWithTabStop buffer n defaultConfig.tabStop
 
 /-- Convert byte offset to Row/Col (display column) using default tab stop. -/
 def getPointFromOffsetInBuffer (buffer : FileBuffer) (offset : Nat) : Point :=
-  getPointFromOffsetInBufferWithTabStop buffer offset 4
+  getPointFromOffsetInBufferWithTabStop buffer offset defaultConfig.tabStop
 
 namespace Buffer
 
