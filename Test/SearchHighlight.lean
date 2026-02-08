@@ -45,6 +45,19 @@ def test : IO Unit := do
     | none => false
   assertEqual "Line search cache resets on buffer switch" true cacheClearedOnSwitch
 
+  let sInc0 := ViE.startOrUpdateSearch ViE.initialState "abc" .forward false
+  let sInc1 := {
+    sInc0 with
+      mode := .searchForward
+      inputState := { sInc0.inputState with commandBuffer := "" }
+  }
+  let sInc2 := ViE.runIncrementalSearch sInc1
+  let incCleared :=
+    match sInc2.searchState with
+    | none => true
+    | some _ => false
+  assertEqual "Incremental search with empty pattern clears highlight state" true incCleared
+
   let t0 := 1000
   let (p0, k0) := ViE.parseKey ViE.initialState '\x1b' t0
   let (p1, k1) := ViE.parseKey p0 '[' (t0 + 1)

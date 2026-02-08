@@ -61,6 +61,19 @@ def handleSearchInput (state : EditorState) (k : Key) : IO EditorState := do
   | Key.backspace =>
       if state.inputState.commandBuffer.length > 0 then
         let newCmd := state.inputState.commandBuffer.dropEnd 1
+        if newCmd.isEmpty then
+          return {
+            state with
+              searchState := none
+              message := ""
+              dirty := true
+              inputState := {
+                state.inputState with
+                  commandBuffer := ""
+                  pendingSearch := false
+              }
+          }
+        else
         let now ← IO.monoMsNow
         let s1 := {
           state with

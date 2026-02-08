@@ -3,8 +3,6 @@ import ViE.Data.PieceTable
 
 namespace ViE
 
-
-
 /-- Editor Mode -/
 inductive Mode where
   | normal
@@ -294,6 +292,9 @@ structure InputState where
   countBuffer : String
   commandBuffer : String
   pendingKeys : String
+  lastFindChar : Option Char := none
+  lastFindForward : Bool := true
+  lastFindTill : Bool := false
   lastInputTime : Nat
   lastSearchInputTime : Nat
   lastSearchRunTime : Nat
@@ -336,6 +337,8 @@ structure EditorState where
   searchState : Option SearchState
   floatingOverlay : Option FloatingOverlay
   floatingInputCommand : Option String := none
+  jumpBack : List Point := []
+  jumpForward : List Point := []
   -- Temporary input state
   inputState : InputState
   -- UI dimensions (updated frequently)
@@ -374,8 +377,7 @@ inductive Direction where
 structure SessionState where
   files : List String
   activeFileIndex : Nat
-  cursors : List (Nat × Nat) -- Row, Col per file
+  cursors : List (Row × Col)
   deriving Repr, Inhabited
-
 
 end ViE

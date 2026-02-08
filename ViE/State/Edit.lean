@@ -16,7 +16,7 @@ def EditorState.insertChar (s : EditorState) (c : Char) : EditorState :=
   let cursor := s.getCursor
   -- Use direct PieceTable insert for atomic undo
   let s' := s.updateActiveBuffer fun buffer =>
-    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val cursor.col.val tabStop with
+    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row cursor.col tabStop with
     | some offset => { buffer with table := buffer.table.insert offset (c.toString) offset
                                    dirty := true }
     | none => buffer
@@ -29,7 +29,7 @@ def EditorState.insertNewline (s : EditorState) : EditorState :=
   let cursor := s.getCursor
   -- Use direct PieceTable insert for atomic undo
   let s' := s.updateActiveBuffer fun buffer =>
-    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val cursor.col.val tabStop with
+    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row cursor.col tabStop with
     | some offset => { buffer with table := buffer.table.insert offset "\n" offset
                                    dirty := true }
     | none => buffer
@@ -44,8 +44,8 @@ def EditorState.deleteBeforeCursor (s : EditorState) : EditorState :=
     let buffer := s.getActiveBuffer
     let prevC := prevCol tabStop buffer cursor.row cursor.col
     let s' := s.updateActiveBuffer fun buffer =>
-       match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val prevC.val tabStop,
-             ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val cursor.col.val tabStop with
+       match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row prevC tabStop,
+             ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row cursor.col tabStop with
        | some startOff, some endOff =>
             let len := endOff - startOff
             if len > 0 then
@@ -82,8 +82,8 @@ def EditorState.deleteCharAfterCursor (s : EditorState) : EditorState :=
   let lineLen := lineDisplayWidth tabStop buffer cursor.row
   let nextC := nextCol tabStop buffer cursor.row cursor.col
   let deletedText :=
-    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val cursor.col.val tabStop,
-          ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val nextC.val tabStop with
+    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row cursor.col tabStop,
+          ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row nextC tabStop with
     | some startOff, some endOff =>
         if cursor.col.val < lineLen && endOff > startOff then
           PieceTree.getSubstring buffer.table.tree startOff (endOff - startOff) buffer.table
@@ -91,8 +91,8 @@ def EditorState.deleteCharAfterCursor (s : EditorState) : EditorState :=
           ""
     | _, _ => ""
   let s' := s.updateActiveBuffer fun buffer =>
-    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val cursor.col.val tabStop,
-          ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val nextC.val tabStop with
+    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row cursor.col tabStop,
+          ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row nextC tabStop with
     | some startOff, some endOff =>
         -- Ensure we don't delete newline if at end of line (unless J behavior, but x usually doesn't join lines)
         if cursor.col.val < lineLen && endOff > startOff then
@@ -164,8 +164,8 @@ def EditorState.deleteRange (s : EditorState) (p1 p2 : Point) : EditorState :=
   let tabStop := s.config.tabStop
   let buffer := s.getActiveBuffer
   let (startOffOpt, endOffOpt) :=
-    match ViE.getOffsetFromPointInBufferWithTabStop buffer p1.row.val p1.col.val tabStop,
-          ViE.getOffsetFromPointInBufferWithTabStop buffer p2.row.val p2.col.val tabStop with
+    match ViE.getOffsetFromPointInBufferWithTabStop buffer p1.row p1.col tabStop,
+          ViE.getOffsetFromPointInBufferWithTabStop buffer p2.row p2.col tabStop with
     | some off1, some off2 => (some (min off1 off2), some (max off1 off2))
     | _, _ => (none, none)
   let deletedText :=
@@ -283,7 +283,7 @@ def EditorState.pasteCharwise (s : EditorState) (text : String) (after : Bool) :
     else
       cursor.col.val
   let s' := s.updateActiveBuffer fun buffer =>
-    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row.val targetCol tabStop with
+    match ViE.getOffsetFromPointInBufferWithTabStop buffer cursor.row ⟨targetCol⟩ tabStop with
     | some offset => { buffer with table := buffer.table.insert offset text offset, dirty := true }
     | none => buffer
   let lines := text.splitOn "\n"
@@ -315,7 +315,7 @@ def EditorState.pasteLinewise (s : EditorState) (text : String) (below : Bool) :
   let s' := s.updateActiveBuffer fun buffer =>
     -- Determine insert offset.
     -- Try start of target line. If EOF, append.
-    let (offset, textToInsert) := match ViE.getOffsetFromPointInBuffer buffer row 0 with
+    let (offset, textToInsert) := match ViE.getOffsetFromPointInBuffer buffer ⟨row⟩ 0 with
                   | some off => (off, text)
                   | none =>
                       let len := buffer.table.tree.length
@@ -365,12 +365,12 @@ def EditorState.pasteBlockwise (s : EditorState) (reg : Register) (after : Bool)
           if targetCol > lineW then
             let pad := targetCol - lineW
             let padStr := String.ofList (List.replicate pad ' ')
-            let insertOff := ViE.getOffsetFromPointInBufferWithTabStop buf row lineW tabStop |>.getD (buf.table.tree.length)
+            let insertOff := ViE.getOffsetFromPointInBufferWithTabStop buf ⟨row⟩ ⟨lineW⟩ tabStop |>.getD (buf.table.tree.length)
             let buf' := { buf with table := buf.table.insert insertOff padStr insertOff, dirty := true }
-            let off' := ViE.getOffsetFromPointInBufferWithTabStop buf' row targetCol tabStop |>.getD insertOff
+            let off' := ViE.getOffsetFromPointInBufferWithTabStop buf' ⟨row⟩ ⟨targetCol⟩ tabStop |>.getD insertOff
             (buf', off')
           else
-            let off := ViE.getOffsetFromPointInBufferWithTabStop buf row targetCol tabStop |>.getD 0
+            let off := ViE.getOffsetFromPointInBufferWithTabStop buf ⟨row⟩ ⟨targetCol⟩ tabStop |>.getD 0
             (buf, off)
         let buf2 := { buf1 with table := buf1.table.insert offset l offset, dirty := true }
         apply buf2 (idx + 1) rest
@@ -400,7 +400,7 @@ def EditorState.undo (s : EditorState) : EditorState :=
   -- Capture current cursor offset (if valid) for redo
   let buf := s.getActiveBuffer
   let cursor := s.getCursor
-  let currentOffset := match ViE.getOffsetFromPointInBufferWithTabStop buf cursor.row.val cursor.col.val tabStop with
+  let currentOffset := match ViE.getOffsetFromPointInBufferWithTabStop buf cursor.row cursor.col tabStop with
                        | some off => off
                        | none => 0
 
@@ -419,7 +419,7 @@ def EditorState.redo (s : EditorState) : EditorState :=
   -- Capture current cursor offset
   let buf := s.getActiveBuffer
   let cursor := s.getCursor
-  let currentOffset := match ViE.getOffsetFromPointInBufferWithTabStop buf cursor.row.val cursor.col.val tabStop with
+  let currentOffset := match ViE.getOffsetFromPointInBufferWithTabStop buf cursor.row cursor.col tabStop with
                        | some off => off
                        | none => 0
 

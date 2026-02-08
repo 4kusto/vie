@@ -120,8 +120,8 @@ def parseGlobal (cmd : String) : Option (Bool × String × String) :=
   else
     none
 
-def lineRangeWithNewline (pt : PieceTable) (row : Nat) : Option (Nat × Nat) :=
-  match pt.getLineRange row with
+def lineRangeWithNewline (pt : PieceTable) (row : Row) : Option (Nat × Nat) :=
+  match pt.getLineRange row.val with
   | some (startOff, len) =>
       let endOff := startOff + len
       if endOff < pt.tree.length then
@@ -134,8 +134,8 @@ def lineRangeWithNewline (pt : PieceTable) (row : Nat) : Option (Nat × Nat) :=
         some (startOff, len)
   | none => none
 
-def collectMatchesInLine (pt : PieceTable) (row : Nat) (pattern : ByteArray) : Array (Nat × Nat) :=
-  match pt.getLineRange row with
+def collectMatchesInLine (pt : PieceTable) (row : Row) (pattern : ByteArray) : Array (Nat × Nat) :=
+  match pt.getLineRange row.val with
   | some (startOff, len) =>
       let bytes := ViE.PieceTree.getBytes pt.tree startOff len pt
       let localMatches := collectMatchesInBytes bytes pattern
@@ -151,13 +151,13 @@ def execGlobal (cmd : String) (state : EditorState) : EditorState :=
       else
         let buf := state.getActiveBuffer
         let cursor := state.getCursor
-        let cursorOffset := ViE.getOffsetFromPointInBuffer buf cursor.row.val cursor.col.val |>.getD 0
+        let cursorOffset := ViE.getOffsetFromPointInBuffer buf cursor.row cursor.col |>.getD 0
         let patBytes := pat.toUTF8
         let lineCount := buf.lineCount
         let matchingRows : Array Nat := Id.run do
           let mut rows : Array Nat := #[]
           for row in [0:lineCount] do
-            let hasMatch := (collectMatchesInLine buf.table row patBytes).size > 0
+            let hasMatch := (collectMatchesInLine buf.table ⟨row⟩ patBytes).size > 0
             if (if isInvert then !hasMatch else hasMatch) then
               rows := rows.push row
           return rows
@@ -165,7 +165,7 @@ def execGlobal (cmd : String) (state : EditorState) : EditorState :=
           let ranges : Array (Nat × Nat) := Id.run do
             let mut acc : Array (Nat × Nat) := #[]
             for row in matchingRows do
-              match lineRangeWithNewline buf.table row with
+              match lineRangeWithNewline buf.table ⟨row⟩ with
               | some (startOff, len) => acc := acc.push (startOff, startOff + len)
               | none => pure ()
             return acc
@@ -184,7 +184,7 @@ def execGlobal (cmd : String) (state : EditorState) : EditorState :=
                 let matches1 : Array (Nat × Nat) := Id.run do
                   let mut acc : Array (Nat × Nat) := #[]
                   for row in matchingRows do
-                    let lineMatches := collectMatchesInLine buf.table row oldBytes
+                    let lineMatches := collectMatchesInLine buf.table ⟨row⟩ oldBytes
                     if doGlobal then
                       acc := acc.append lineMatches
                     else
@@ -208,7 +208,7 @@ def execSubstitute (cmd : String) (state : EditorState) : EditorState :=
         let doGlobal := flags.contains 'g'
         let buf := state.getActiveBuffer
         let cursor := state.getCursor
-        let cursorOffset := ViE.getOffsetFromPointInBuffer buf cursor.row.val cursor.col.val |>.getD 0
+        let cursorOffset := ViE.getOffsetFromPointInBuffer buf cursor.row cursor.col |>.getD 0
         let patBytes := old.toUTF8
         let matches1 :=
           if isGlobal then

@@ -164,6 +164,11 @@ def shouldRenderMessageAsFloat (msg : String) : Bool :=
 /-- Default key bindings. -/
 def makeKeyMap (commands : CommandMap) : KeyMap := {
   normal := fun s k =>
+  let rawCount (state : EditorState) : Nat :=
+      match state.inputState.countBuffer.toNat? with
+      | some n => n
+      | none => 0
+
   let handleMotion (state : EditorState) (motion : EditorState → EditorState) : IO EditorState :=
       let n := if state.getCount == 0 then 1 else state.getCount
       let rec applyN (st : EditorState) (count : Nat) : EditorState :=
@@ -258,6 +263,23 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
       | Key.char 'O' => pure { (overlayOpenLineAbove s) with mode := .insert }
       | _ => pure s
   else
+    if s.inputState.previousKey == some 'f' then
+      match k with
+      | Key.char c =>
+        let s' := { s with inputState := { s.inputState with previousKey := none } }
+        let n := if s'.getCount == 0 then 1 else s'.getCount
+        pure $ clearInput (EditorState.findCharMotion s' c true false n true)
+      | _ =>
+        pure { s with inputState := { s.inputState with previousKey := none, countBuffer := "" } }
+    else if s.inputState.previousKey == some 't' then
+      match k with
+      | Key.char c =>
+        let s' := { s with inputState := { s.inputState with previousKey := none } }
+        let n := if s'.getCount == 0 then 1 else s'.getCount
+        pure $ clearInput (EditorState.findCharMotion s' c true true n true)
+      | _ =>
+        pure { s with inputState := { s.inputState with previousKey := none, countBuffer := "" } }
+    else
     if shouldRenderMessageAsFloat s.message then
       match k with
       | Key.esc => pure { s with message := "", dirty := true }
@@ -306,6 +328,8 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
       pure {
         s with
           mode := Mode.searchForward
+          searchState := none
+          message := ""
           inputState := {
             s.inputState with
               commandBuffer := ""
@@ -318,6 +342,8 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
       pure {
         s with
           mode := Mode.searchBackward
+          searchState := none
+          message := ""
           inputState := {
             s.inputState with
               commandBuffer := ""
@@ -336,6 +362,28 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
      else
         pure { s with inputState := { s.inputState with countBuffer := s.inputState.countBuffer.push '0' } }
     | Key.char '$' => handleMotion s EditorState.moveToLineEnd
+    | Key.char 'H' =>
+      let n := rawCount s
+      pure $ clearInput ((s.pushJumpPoint).moveToScreenTop n)
+    | Key.char 'M' =>
+      pure $ clearInput ((s.pushJumpPoint).moveToScreenMiddle)
+    | Key.char 'L' =>
+      let n := rawCount s
+      pure $ clearInput ((s.pushJumpPoint).moveToScreenBottom n)
+    | Key.char 'f' =>
+      pure { s with inputState := { s.inputState with previousKey := some 'f' } }
+    | Key.char 't' =>
+      pure { s with inputState := { s.inputState with previousKey := some 't' } }
+    | Key.char ';' =>
+      pure $ clearInput (EditorState.repeatFindChar s false)
+    | Key.char ',' =>
+      pure $ clearInput (EditorState.repeatFindChar s true)
+    | Key.char '%' =>
+      pure $ clearInput ((s.pushJumpPoint).jumpMatchingBracket)
+    | Key.char '*' =>
+      pure $ clearInput (EditorState.searchWordUnderCursor s .forward)
+    | Key.char '#' =>
+      pure $ clearInput (EditorState.searchWordUnderCursor s .backward)
 
     | Key.char 'w' =>
       match s.inputState.previousKey with
@@ -366,7 +414,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
      | _ => pure { s with inputState := { s.inputState with previousKey := some 'y' } }
     | Key.char '|' =>
       let n := s.getCount
-      pure $ clearInput (EditorState.jumpToColumn s n)
+      pure $ clearInput (EditorState.jumpToColumn s ⟨n⟩)
     | Key.char 'c' =>
       match s.inputState.previousKey with
       | some 'c' =>
@@ -379,6 +427,28 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
       | some 'd' => pure $ s.deleteCurrentLine
       | _ => pure { s with inputState := { s.inputState with previousKey := some 'd' } }
     | Key.char 'u' => pure $ s.undo
+    | Key.ctrl 'd' =>
+      let n := rawCount s
+      pure $ clearInput (EditorState.scrollHalfPageDown s n)
+    | Key.ctrl 'u' =>
+      let n := rawCount s
+      pure $ clearInput (EditorState.scrollHalfPageUp s n)
+    | Key.ctrl 'f' =>
+      let n := rawCount s
+      pure $ clearInput (EditorState.scrollPageDown s n)
+    | Key.ctrl 'b' =>
+      let n := rawCount s
+      pure $ clearInput (EditorState.scrollPageUp s n)
+    | Key.ctrl 'e' =>
+      let n := rawCount s
+      pure $ clearInput (EditorState.scrollWindowDown s n)
+    | Key.ctrl 'y' =>
+      let n := rawCount s
+      pure $ clearInput (EditorState.scrollWindowUp s n)
+    | Key.ctrl 'o' =>
+      pure $ clearInput (EditorState.jumpBackInList s)
+    | Key.char '\t' =>
+      pure $ clearInput (EditorState.jumpForwardInList s)
     | Key.ctrl 'r' => pure $ s.redo
     | Key.ctrl 'l' => pure { s with dirty := true, message := "redraw" }
     | Key.ctrl 'w' =>

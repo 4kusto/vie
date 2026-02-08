@@ -277,6 +277,68 @@ def testCounted : IO Unit := do
   let s_2j ← runKeys s_lines [Key.char '2', Key.char 'j']
   assertCursor "2j moves 2 lines down" s_2j 2 0
 
+def testVimCompatMotions : IO Unit := do
+  IO.println "  Testing Vim Compatibility Motions..."
+  let s0 := { ViE.initialState with windowHeight := 12, windowWidth := 80 }
+  let lines := String.intercalate "\n" ((List.range 30).map (fun i => s!"  line{i}")) ++ "\n"
+  let s1 ← runKeys s0 ([Key.char 'i'] ++ keys lines ++ [Key.esc] ++ keys "gg0")
+
+  let sCd ← runKeys s1 [Key.ctrl 'd']
+  assertCursor "Ctrl-d scrolls half page down" sCd 5 0
+
+  let sCu ← runKeys sCd [Key.ctrl 'u']
+  assertCursor "Ctrl-u scrolls half page up" sCu 0 0
+
+  let sCf ← runKeys s1 [Key.ctrl 'f']
+  assertCursor "Ctrl-f scrolls one page down" sCf 10 0
+
+  let sCb ← runKeys sCf [Key.ctrl 'b']
+  assertCursor "Ctrl-b scrolls one page up" sCb 0 0
+
+  let sCe ← runKeys s1 [Key.ctrl 'e']
+  let (ceRow, _) := sCe.getScroll
+  assertEqual "Ctrl-e scrolls window down by one line" 1 ceRow.val
+
+  let sCy ← runKeys sCe [Key.ctrl 'y']
+  let (cyRow, _) := sCy.getScroll
+  assertEqual "Ctrl-y scrolls window up by one line" 0 cyRow.val
+
+  let sH ← runKeys sCf [Key.char 'H']
+  assertCursor "H moves to top line of screen" sH 10 2
+
+  let sM ← runKeys sCf [Key.char 'M']
+  assertCursor "M moves to middle line of screen" sM 15 2
+
+  let sL ← runKeys sCf [Key.char 'L']
+  assertCursor "L moves to bottom line of screen" sL 19 2
+
+  let sF0 ← runKeys s0 ([Key.char 'i'] ++ keys "abcaXcaYca" ++ [Key.esc] ++ [Key.char '0'])
+  let sF1 ← runKeys sF0 [Key.char 'f', Key.char 'a']
+  assertCursor "fa finds next character" sF1 0 3
+  let sF2 ← runKeys sF1 [Key.char ';']
+  assertCursor "; repeats last f motion" sF2 0 6
+  let sF3 ← runKeys sF2 [Key.char ',']
+  assertCursor ", reverses last f motion" sF3 0 3
+  let sT1 ← runKeys sF3 [Key.char 't', Key.char 'a']
+  assertCursor "ta moves before target" sT1 0 5
+  let sT2 ← runKeys sT1 [Key.char ';']
+  assertCursor "; repeats last t motion" sT2 0 8
+
+  let sPct0 ← runKeys s0 ([Key.char 'i'] ++ keys "(a[b]c)" ++ [Key.esc] ++ [Key.char '0'])
+  let sPct1 ← runKeys sPct0 [Key.char '%']
+  assertCursor "% jumps to matching bracket" sPct1 0 6
+  let sPct2 ← runKeys sPct1 [Key.ctrl 'o']
+  assertCursor "Ctrl-o jumps back in jump list" sPct2 0 0
+  let sPct3 ← runKeys sPct2 [Key.char '\t']
+  assertCursor "Ctrl-i (Tab) jumps forward in jump list" sPct3 0 6
+
+  let sStar0 := ViE.initialState
+  let sStar1 ← runKeys sStar0 ([Key.char 'i'] ++ keys "foo bar\nfoo baz\nbar foo\n" ++ [Key.esc] ++ keys "gg0")
+  let sStar2 ← runKeys sStar1 [Key.char '*']
+  assertCursor "* searches next word under cursor" sStar2 1 0
+  let sStar3 ← runKeys sStar2 [Key.char '#']
+  assertCursor "# searches previous word under cursor" sStar3 0 0
+
 def testWorkgroupSwitch : IO Unit := do
   IO.println "  Testing Workgroup Switching..."
   let s0 := ViE.initialState
@@ -292,6 +354,13 @@ def testSearch : IO Unit := do
 
   let s2 ← runKeys s1 ([Key.char '/'] ++ keys "hello" ++ [Key.enter])
   assertCursor "/hello finds first match" s2 0 0
+
+  let s2Prompt ← runKeys s2 [Key.char '/']
+  let promptCleared :=
+    match s2Prompt.searchState with
+    | none => true
+    | some _ => false
+  assertEqual "Starting new search prompt clears old search highlight state" true promptCleared
 
   let s2e ← runKeys s2 [Key.enter]
   assertCursor "Enter after search jumps to next match" s2e 1 0
@@ -697,6 +766,7 @@ def test : IO Unit := do
   testOperators
   testVisual
   testCounted
+  testVimCompatMotions
   testWorkgroupSwitch
   testSearch
   testCommandSubstitute

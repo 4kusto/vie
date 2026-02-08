@@ -32,11 +32,11 @@ def resolveStartupTarget (filename : Option String) : IO (Option String × Optio
       pure (none, some path)
   | none => pure (none, none)
 
-def clampCursorInBuffer (buffer : FileBuffer) (row col : Nat) : Point :=
+def clampCursorInBuffer (buffer : FileBuffer) (row : Row) (col : Col) : Point :=
   let lineCount := buffer.lineCount
-  let clampedRow := if lineCount == 0 then 0 else min row (lineCount - 1)
+  let clampedRow := if lineCount == 0 then 0 else min row.val (lineCount - 1)
   let lineLen := ViE.getLineLengthFromBuffer buffer ⟨clampedRow⟩ |>.getD 0
-  let clampedCol := if lineLen == 0 then 0 else min col (lineLen - 1)
+  let clampedCol := if lineLen == 0 then 0 else min col.val (lineLen - 1)
   { row := ⟨clampedRow⟩, col := ⟨clampedCol⟩ }
 
 /-- Build startup workspace from a restored checkpoint session. -/
@@ -79,7 +79,7 @@ def buildRestoredWorkspace (settings : EditorConfig) (workspacePath : Option Str
   let activeIdx := if activeIdx < loaded.size then activeIdx else 0
   let activeBuf := loaded[activeIdx]!
   let (row, col) := List.getD cursors activeIdx (0, 0)
-  let cursor := clampCursorInBuffer activeBuf row col
+  let cursor := clampCursorInBuffer activeBuf ⟨row⟩ ⟨col⟩
   return {
     name := wsName
     rootPath := workspacePath

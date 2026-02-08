@@ -22,12 +22,12 @@ def updateSearchCache (state : SearchState) (offset : Nat) : SearchState :=
 def getCursorOffset (s : EditorState) : Nat :=
   let buf := s.getActiveBuffer
   let cursor := s.getCursor
-  ViE.getOffsetFromPointInBuffer buf cursor.row.val cursor.col.val |>.getD 0
+  ViE.getOffsetFromPointInBufferWithTabStop buf cursor.row cursor.col s.config.tabStop |>.getD 0
 
 def applyMatchOffset (s : EditorState) (offset : Nat) : EditorState :=
   let buf := s.getActiveBuffer
-  let (r, c) := buf.table.getPointFromOffset offset
-  s.setCursor { row := ⟨r⟩, col := ⟨c⟩ }
+  let p := ViE.getPointFromOffsetInBufferWithTabStop buf offset s.config.tabStop
+  s.setCursor p
 
 def startSearch (s : EditorState) (pattern : String) (direction : SearchDirection) (useBloom : Bool) : EditorState :=
   let cursorOffset := getCursorOffset s
@@ -126,7 +126,7 @@ def findNextMatch (s : EditorState) (directionOverride : Option SearchDirection 
           let st' := { st with bloomCache := bloomCache, bloomOrder := bloomOrder }
           { s with searchState := some st', message := s!"Pattern not found: {st.pattern}" }
       | some off =>
-          let s' := applyMatchOffset s off
+          let s' := applyMatchOffset (s.pushJumpPoint) off
           let st' := updateSearchCache { st with lastMatch := some off, bloomCache := bloomCache, bloomOrder := bloomOrder } off
           let st'' := { st' with direction := direction }
           let bloomTag := if useBloom then " [bloom]" else ""
@@ -137,13 +137,28 @@ def findNextMatch (s : EditorState) (directionOverride : Option SearchDirection 
               s!"Match: {st.pattern}{bloomTag}"
           { s' with searchState := some st'', message := msg }
 
+def EditorState.searchWordUnderCursor (s : EditorState) (direction : SearchDirection) : EditorState :=
+  match s.wordUnderCursor with
+  | none => { s with message := "No keyword under cursor" }
+  | some word =>
+      let s1 := s.pushJumpPoint
+      let cursor := s1.getCursor
+      let cursorOffset :=
+        ViE.getOffsetFromPointInBufferWithTabStop s1.getActiveBuffer cursor.row cursor.col s1.config.tabStop |>.getD 0
+      let s2 := ViE.startOrUpdateSearch s1 word direction false
+      let s3 :=
+        match s2.searchState with
+        | none => s2
+        | some st => { s2 with searchState := some { st with lastMatch := some cursorOffset } }
+      ViE.findNextMatch s3 (some direction)
+
 def runIncrementalSearch (s : EditorState) : EditorState :=
   if s.mode != .searchForward && s.mode != .searchBackward then
     s
   else
     let pattern := s.inputState.commandBuffer
     if pattern.isEmpty then
-      s
+      { s with searchState := none, message := "", dirty := true }
     else
       let direction := if s.mode == .searchBackward then SearchDirection.backward else SearchDirection.forward
       let s' := startOrUpdateSearch s pattern direction false
