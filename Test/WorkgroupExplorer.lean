@@ -26,7 +26,7 @@ def setCursorRow (state : EditorState) (row : Nat) : EditorState :=
 def test : IO Unit := do
   IO.println "Starting Workgroup Explorer Test..."
 
-  let s0 := ViE.initialState
+  let s0 := { ViE.initialState with windowHeight := 40, windowWidth := 120 }
   let ws1 := makeWorkspaceState "Project A" (some "/tmp/project-a") 10
   let ws2 := makeWorkspaceState "Project B" (some "/tmp/project-b") 20
   let s1 := addWorkspace (addWorkspace s0 ws1) ws2
@@ -35,6 +35,8 @@ def test : IO Unit := do
 
   let s2 ← ViE.Command.cmdWg ["list"] s1
   assertEqual "Explorer buffer is active" (some "explorer://workgroups") s2.getActiveBuffer.filename
+  let ws2 := s2.getCurrentWorkspace
+  assertEqual "Workgroup explorer opens in floating window" true (ws2.isFloatingWindow ws2.activeWindowId)
 
   let bufText := s2.getActiveBuffer.table.toString
   assertEqual "Explorer contains Workgroup header" true (bufText.contains "Workgroup Explorer")
@@ -51,6 +53,13 @@ def test : IO Unit := do
     assertEqual "Workgroup explorer preview window exists" true explorer.previewWindowId.isSome
     let previewWinId := explorer.previewWindowId.get!
     let wsPrev := s2.getCurrentWorkspace
+    assertEqual "Workgroup explorer preview window is floating" true (wsPrev.isFloatingWindow previewWinId)
+    let pairSideBySide :=
+      match s2.getFloatingWindowBounds wsPrev.activeWindowId, s2.getFloatingWindowBounds previewWinId with
+      | some (et, el, eh, ew), some (pt, pl, ph, pw) =>
+          et == pt && eh == ph && ((el + ew <= pl) || (pl + pw <= el))
+      | _, _ => false
+    assertEqual "Workgroup explorer/preview floating pair is side-by-side" true pairSideBySide
     let previewView := wsPrev.layout.findView previewWinId |>.getD initialView
     let previewBuf := wsPrev.buffers.find? (fun b => b.id == previewView.bufferId) |>.getD initialBuffer
     let previewText := previewBuf.table.toString
@@ -59,13 +68,13 @@ def test : IO Unit := do
 
   let s3 := setCursorRow s2 2
   let s4 ← ViE.Feature.handleExplorerEnter s3
-  assertEqual "New workgroup enters command mode" Mode.command s4.mode
-  assertEqual "New workgroup command prompt" "wg new " s4.inputState.commandBuffer
+  assertEqual "New workgroup opens floating input" true s4.floatingOverlay.isSome
+  assertEqual "New workgroup floating command prefix" (some "wg new ") s4.floatingInputCommand
 
   let s3b := setCursorRow s2 3
   let s4b ← ViE.Feature.handleExplorerEnter s3b
-  assertEqual "Rename workgroup enters command mode" Mode.command s4b.mode
-  assertEqual "Rename workgroup command prompt" true (s4b.inputState.commandBuffer.startsWith "wg rename ")
+  assertEqual "Rename workgroup opens floating input" true s4b.floatingOverlay.isSome
+  assertEqual "Rename workgroup floating command prefix" (some "wg rename ") s4b.floatingInputCommand
 
   let s4c ← ViE.Command.cmdWg ["rename", ""] s2
   assertEqual "Rename workgroup rejects empty" "Workgroup name cannot be empty" s4c.message

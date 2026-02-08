@@ -19,6 +19,7 @@ import Test.MissingEol
 import Test.Scroll
 import Test.Checkpoint
 import Test.SearchHighlight
+import Test.TreeStats
 
 def test : IO Unit := do
   IO.println "Running all tests..."
@@ -43,6 +44,7 @@ def test : IO Unit := do
   Test.MissingEol.test
   Test.Checkpoint.test
   Test.SearchHighlight.test
+  Test.TreeStats.test
   IO.println "All tests finished."
 
 def main : IO Unit := do

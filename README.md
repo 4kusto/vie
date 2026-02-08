@@ -25,6 +25,7 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
   - place this source and Main.lean in '~/.config/editor/' and :reload
 - Search (WIP)
 - Optional bloom filter acceleration for search
+- Floating overlay (`:float`)
 
 ## Search
 - `/` forward search, `?` backward search
@@ -65,6 +66,7 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 - `|`: Jump to column (preceded by number)
 - `[number]`: Type a number to set count for `|` or `G` command
 - `Enter`: Move cursor down
+- `Ctrl-l`: Redraw
 
 ### Insert Mode
 - `Esc`: Return to Normal Mode
@@ -112,14 +114,25 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 - `:wg close`: Close current workgroup
 - `:wg rename <name>`: Rename current workgroup
 - `:wg next`, `:wg prev`, `:wg <index>`: Switch workgroup
-- `:ee [path]`: Open file explorer
-- `:wgex`: Open workgroup explorer
+- `:ex list [path]`: Open file explorer
+- `:ee [path]`: Alias for `:ex list [path]`
+- `:buf list`: Open buffer explorer for switching among opened buffers
+- `:buffers`, `:ls`: Aliases for `:buf list`
+- `:wgex`: Alias for `:wg list`
 - `:undo`, `:u`: Undo
 - `:redo`: Redo
 - `:reload`: reload configuration
 - `:refresh`: alias for `:reload`
 - `:bloom /pattern`, `:bloom ?pattern`: Bloom-assisted search
 - `:noh`, `:nohl`: Clear search highlight
+- `:redraw`, `:redraw!`: Force redraw and clear render caches
+- `:float [--title <title>|--title=<title>] [--width <cols>|--width=<cols>] <text>`: Show centered floating overlay (`\\n` to split lines)
+- `:float` default size: width/height follows message content size (clamped to current screen buffer)
+- `:float clear`, `:nofloat`: Close floating overlay
+- `:floatwin [toggle|on|off|clear]`: Toggle active window as floating window (buffer is the same workspace buffer)
+- floating overlay keys:
+- `NORMAL`: `i/a/o/O/h/j/k/l/0/$/x` edit/move, `Esc`/`Enter`/`q` close
+- `INSERT`: text input, `Backspace`, `Enter` newline, `Esc` back to overlay `NORMAL`
 - `:s/old/new/[g]`: Substitute on current line
 - `:%s/old/new/[g]`: Substitute on all lines
 - `:g/pat/ d`: Delete matching lines

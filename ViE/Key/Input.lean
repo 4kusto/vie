@@ -3,50 +3,69 @@ import ViE.Types
 
 namespace ViE.Key
 
+def flushEscSequence (seq : String) : List Key :=
+  seq.toList.map (fun ch => if ch == '\x1b' then Key.esc else Key.char ch)
+
+def isAsciiInRange (ch : Char) (lo hi : Nat) : Bool :=
+  let n := ch.toNat
+  lo <= n && n <= hi
+
+def isCsiParamChar (ch : Char) : Bool :=
+  ch.isDigit || ch == ';' || ch == '?' || ch == ':' || ch == '<' || ch == '=' || ch == '>'
+
+def isCsiFinalChar (ch : Char) : Bool :=
+  isAsciiInRange ch 0x40 0x7e
+
+def decodeCsiFinal (ch : Char) : Key :=
+  match ch with
+  | 'A' => Key.up
+  | 'B' => Key.down
+  | 'C' => Key.right
+  | 'D' => Key.left
+  | 'H' => Key.unknown 'H'
+  | 'F' => Key.unknown 'F'
+  | _ => Key.unknown ch
+
+def withPending (state : EditorState) (pending : String) (currentTime : Nat) : EditorState :=
+  { state with inputState := { state.inputState with pendingKeys := pending, lastInputTime := currentTime } }
+
+def clearPending (state : EditorState) : EditorState :=
+  { state with inputState := { state.inputState with pendingKeys := "" } }
+
 /-- Parse a character into a list of keys, handling escape sequences statefully. -/
 def parseKey (state : EditorState) (c : Char) (currentTime : Nat) : (EditorState × List Key) :=
-  -- If we have pending keys (escape sequence in progress)
   if state.inputState.pendingKeys.length > 0 then
     let pending := state.inputState.pendingKeys.push c
-    -- Check for known sequences
     match pending with
     | "\x1b" =>
-      ({ state with inputState := { state.inputState with pendingKeys := pending, lastInputTime := currentTime } }, [])
+      (withPending state pending currentTime, [])
     | "\x1b[" =>
-       -- CSI sequence starter, keep waiting
-       ({ state with inputState := { state.inputState with pendingKeys := pending, lastInputTime := currentTime } }, [])
-    | "\x1b[A" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.up])
-    | "\x1b[B" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.down])
-    | "\x1b[C" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.right])
-    | "\x1b[D" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.left])
-    | "\x1b[H" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.unknown 'H']) -- Home?
-    | "\x1b[F" => ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.unknown 'F']) -- End?
+      (withPending state pending currentTime, [])
     | _ =>
-       -- Treat ESC + <char> as Alt combination when it's a single character and not CSI.
-       match pending.toList with
-       | ['\x1b', ch] =>
-         if ch != '[' then
-           ({ state with inputState := { state.inputState with pendingKeys := "" } }, [Key.alt ch])
-         else
-           ({ state with inputState := { state.inputState with pendingKeys := pending, lastInputTime := currentTime } }, [])
-       | _ =>
-       -- Unknown sequence or incomplete?
-       -- If length is long enough (e.g. 3 chars) and no match, flush as individual keys?
-       -- Or check if it starts with valid prefix.
-       if pending.startsWith "\x1b[" && pending.length < 5 then
-          ({ state with inputState := { state.inputState with pendingKeys := pending, lastInputTime := currentTime } }, [])
-       else
-          -- Flush everything as individual characters
-          -- (Note: this simplifies, strictly we should map char-by-char)
-          let keys := pending.toList.map (fun x => if x == '\x1b' then Key.esc else Key.char x)
-          ({ state with inputState := { state.inputState with pendingKeys := "" } }, keys)
+      match pending.toList with
+      | ['\x1b', ch] =>
+        if ch == '[' then
+          (withPending state pending currentTime, [])
+        else
+          (clearPending state, [Key.alt ch])
+      | _ =>
+        if pending.startsWith "\x1b[" then
+          let chars := pending.toList
+          let last := chars.getLastD '\x00'
+          if isCsiFinalChar last then
+            (clearPending state, [decodeCsiFinal last])
+          else if isCsiParamChar last && pending.length <= 12 then
+            (withPending state pending currentTime, [])
+          else if pending.length > 12 then
+            (clearPending state, flushEscSequence pending)
+          else
+            (clearPending state, flushEscSequence pending)
+        else
+          (clearPending state, flushEscSequence pending)
   else
-    -- No pending keys
     if c == '\x1b' then
-       -- Start escape sequence
-       ({ state with inputState := { state.inputState with pendingKeys := "\x1b", lastInputTime := currentTime } }, [])
+       (withPending state "\x1b" currentTime, [])
     else
-       -- Normal character (using logic similar to old fromChar)
        let k := match c with
         | '\x01' => Key.ctrl 'a'
         | '\x02' => Key.ctrl 'b'
@@ -80,10 +99,9 @@ def parseKey (state : EditorState) (c : Char) (currentTime : Nat) : (EditorState
 /-- Check for escape sequence timeout. -/
 def checkTimeout (state : EditorState) (currentTime : Nat) : (EditorState × List Key) :=
   if state.inputState.pendingKeys.length > 0 then
-    if currentTime - state.inputState.lastInputTime > 50 then -- 50ms timeout
-       -- Timeout! Flush pending keys as is.
-       let keys := state.inputState.pendingKeys.toList.map (fun x => if x == '\x1b' then Key.esc else Key.char x)
-       ({ state with inputState := { state.inputState with pendingKeys := "" } }, keys)
+    if currentTime - state.inputState.lastInputTime > 50 then
+       let keys := flushEscSequence state.inputState.pendingKeys
+       (clearPending state, keys)
     else
        (state, [])
   else

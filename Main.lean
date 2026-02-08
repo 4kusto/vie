@@ -7,8 +7,8 @@ def customConfig : ViE.EditorConfig := {
   ViE.defaultConfig with
   showLineNumbers := true
   statusBarStyle := (toBg Color.brightBlack) ++ (toFg Color.white)
-  fileIcon := "File: "
-  dirIcon := "Dir : "
+  --fileIcon := "File: "
+  --dirIcon := "Dir : "
 }
 
 def customKeyMap (commands : ViE.CommandMap) : ViE.KeyMap := {

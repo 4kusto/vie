@@ -26,6 +26,28 @@ def runKeys (s : EditorState) (ks : List Key) : IO EditorState := do
   let config := makeTestConfig
   ks.foldlM (fun s k => ViE.update config s k) s
 
+def findEntryIndex (entries : List FileEntry) (name : String) : Option Nat :=
+  let rec loop (rest : List FileEntry) (idx : Nat) : Option Nat :=
+    match rest with
+    | [] => none
+    | e :: tail =>
+        if e.name == name then
+          some idx
+        else
+          loop tail (idx + 1)
+  loop entries 0
+
+def findEntryIndexByPath (entries : List FileEntry) (path : String) : Option Nat :=
+  let rec loop (rest : List FileEntry) (idx : Nat) : Option Nat :=
+    match rest with
+    | [] => none
+    | e :: tail =>
+        if e.path == path then
+          some idx
+        else
+          loop tail (idx + 1)
+  loop entries 0
+
 def testMotions : IO Unit := do
   IO.println "  Testing Motions..."
   let s0 := ViE.initialState
@@ -312,6 +334,347 @@ def testCommandBloom : IO Unit := do
   let s3 ← runKeys s2 ([Key.char ':'] ++ keys "bloom /nomatch" ++ [Key.enter])
   assertEqual ":bloom not found message" "Pattern not found: nomatch" s3.message
 
+def testUiCommands : IO Unit := do
+  IO.println "  Testing UI Commands..."
+  let s0 := ViE.initialState
+
+  let s1 ← runKeys s0 ([Key.char ':'] ++ keys "float hello" ++ [Key.enter])
+  assertEqual ":float shows overlay" true s1.floatingOverlay.isSome
+
+  let s2 ← runKeys s1 [Key.esc]
+  assertEqual "Esc closes overlay" false s2.floatingOverlay.isSome
+
+  let s3 ← runKeys s0 ([Key.char ':'] ++ keys "float alpha\\nbeta" ++ [Key.enter])
+  match s3.floatingOverlay with
+  | some overlay =>
+      assertEqual ":float parses newline escape (line count)" 2 overlay.lines.size
+      assertEqual ":float parses newline escape (line 1)" "alpha" overlay.lines[0]!
+      assertEqual ":float parses newline escape (line 2)" "beta" overlay.lines[1]!
+  | none =>
+      assertEqual ":float newline overlay exists" true false
+
+  let s4 ← runKeys s3 ([Key.char ':'] ++ keys "nofloat" ++ [Key.enter])
+  assertEqual ":nofloat clears overlay" false s4.floatingOverlay.isSome
+
+  let s5 ← runKeys s0 ([Key.char ':'] ++ keys "redraw" ++ [Key.enter])
+  assertEqual ":redraw sets message" "redraw" s5.message
+  assertEqual ":redraw marks dirty" true s5.dirty
+
+  let s6 ← runKeys s0 ([Key.char ':'] ++ keys "redraw!" ++ [Key.enter])
+  assertEqual ":redraw! alias works" "redraw" s6.message
+
+  let s7 ← runKeys s0 [Key.ctrl 'l']
+  assertEqual "Ctrl-l redraw marks dirty" true s7.dirty
+
+  let s8 ← runKeys s0 ([Key.char ':'] ++ keys "float --title Note --width 32 hello world" ++ [Key.enter])
+  match s8.floatingOverlay with
+  | some overlay =>
+      assertEqual ":float --title sets title" "Note" overlay.title
+      assertEqual ":float --width sets width" 32 overlay.maxWidth
+      assertEqual ":float with options keeps text" "hello world" overlay.lines[0]!
+  | none =>
+      assertEqual ":float with options shows overlay" true false
+
+  let s9 ← runKeys s0 ([Key.char ':'] ++ keys "float --title=Panel --width=28 hi" ++ [Key.enter])
+  match s9.floatingOverlay with
+  | some overlay =>
+      assertEqual ":float --title= sets title" "Panel" overlay.title
+      assertEqual ":float --width= sets width" 28 overlay.maxWidth
+  | none =>
+      assertEqual ":float with inline options shows overlay" true false
+
+  let s10 ← runKeys s0 ([Key.char ':'] ++ keys "float --width nope hi" ++ [Key.enter])
+  assertEqual ":float invalid width message" "Invalid float width: nope" s10.message
+
+  let s11 ← runKeys s0 ([Key.char 'i'] ++ keys "abc" ++ [Key.esc] ++ [Key.char ':'] ++ keys "float guard" ++ [Key.enter])
+  let s12 ← runKeys s11 [Key.char 'i']
+  assertEqual "floating overlay enters insert mode" Mode.insert s12.mode
+  let s13 ← runKeys s12 (keys "X" ++ [Key.enter] ++ keys "Y")
+  match s13.floatingOverlay with
+  | some overlay =>
+      assertEqual "floating overlay writes text" "guardX" overlay.lines[0]!
+      assertEqual "floating overlay writes next line" "Y" overlay.lines[1]!
+  | none =>
+      assertEqual "floating overlay remains open while editing" true false
+  let s14 ← runKeys s13 [Key.esc]
+  assertEqual "Esc exits floating overlay insert mode" Mode.normal s14.mode
+  let s15 ← runKeys s14 [Key.enter]
+  assertEqual "Enter closes floating overlay" false s15.floatingOverlay.isSome
+
+  let sMsg0 := { s0 with message := "Error: sample message", dirty := true }
+  let sMsg1 ← runKeys sMsg0 [Key.enter]
+  assertEqual "Enter closes message float" "" sMsg1.message
+
+  let sMsg2 := { s0 with message := "Cannot write preview buffer", dirty := true }
+  let sMsg3 ← runKeys sMsg2 [Key.esc]
+  assertEqual "Esc closes message float" "" sMsg3.message
+
+  let sPrompt0 ← runKeys s0 ([Key.char ':'] ++ keys "ws list" ++ [Key.enter])
+  let sPrompt1 := sPrompt0.updateActiveView fun v => { v with cursor := { row := ⟨2⟩, col := 0 } }
+  let sPrompt2 ← runKeys sPrompt1 [Key.enter]
+  assertEqual "Workspace explorer New opens floating input" true sPrompt2.floatingOverlay.isSome
+  assertEqual "Workspace explorer New sets floating command prefix" (some "ws new ") sPrompt2.floatingInputCommand
+  let sPrompt3 ← runKeys sPrompt2 (keys "TmpWS" ++ [Key.enter])
+  assertEqual "Workspace explorer floating input submits with Enter" "TmpWS" sPrompt3.getCurrentWorkspace.name
+  assertEqual "Workspace explorer floating input closes after submit" false sPrompt3.floatingOverlay.isSome
+
+  let sWsCmd0 ← runKeys s0 ([Key.char ':'] ++ keys "ws new" ++ [Key.enter])
+  assertEqual ":ws new opens floating input" true sWsCmd0.floatingOverlay.isSome
+  assertEqual ":ws new floating command prefix" (some "ws new ") sWsCmd0.floatingInputCommand
+  let sWsCmd1 ← runKeys sWsCmd0 (keys "CmdWorkspace" ++ [Key.enter])
+  assertEqual ":ws new floating input submits name" "CmdWorkspace" sWsCmd1.getCurrentWorkspace.name
+
+  let sWgCmd0 ← runKeys s0 ([Key.char ':'] ++ keys "wg new" ++ [Key.enter])
+  assertEqual ":wg new opens floating input" true sWgCmd0.floatingOverlay.isSome
+  assertEqual ":wg new floating command prefix" (some "wg new ") sWgCmd0.floatingInputCommand
+  let sWgCmd1 ← runKeys sWgCmd0 (keys "CmdGroup" ++ [Key.enter])
+  assertEqual ":wg new floating input submits name" "CmdGroup" sWgCmd1.getCurrentWorkgroup.name
+
+  let stamp ← IO.monoMsNow
+  let tmpRoot := s!"/tmp/vie-explorer-create-{stamp}"
+  IO.FS.createDirAll tmpRoot
+  let sExp0 := { s0 with windowHeight := 30, windowWidth := 100 }
+  let sExp1 ← runKeys sExp0 ([Key.char ':'] ++ keys s!"ex list {tmpRoot}" ++ [Key.enter])
+  let explorerOpt := sExp1.explorers.find? (fun (id, _) => id == sExp1.getActiveBuffer.id)
+  match explorerOpt with
+  | none =>
+      assertEqual "Explorer create test has active explorer" true false
+  | some (_, explorer) =>
+      let newFileIdx := (findEntryIndex explorer.entries "[New File]").getD 0
+      let sExp2 := sExp1.updateActiveView fun v => { v with cursor := { row := ⟨2 + newFileIdx⟩, col := 0 } }
+      let sExp3 ← runKeys sExp2 [Key.enter]
+      assertEqual "Explorer [New File] opens floating input" true sExp3.floatingOverlay.isSome
+      assertEqual "Explorer [New File] sets command prefix" (some s!"mkfile {tmpRoot}/") sExp3.floatingInputCommand
+      let sExp4 ← runKeys sExp3 (keys "alpha.txt" ++ [Key.enter])
+      let fileCreated ← (System.FilePath.mk s!"{tmpRoot}/alpha.txt").pathExists
+      assertEqual "Explorer [New File] creates file" true fileCreated
+      let explorerOpt2 := sExp4.explorers.find? (fun (id, _) => id == sExp4.getActiveBuffer.id)
+      match explorerOpt2 with
+      | none =>
+          assertEqual "Explorer refreshed after file create" true false
+      | some (_, explorer2) =>
+          assertEqual "Explorer list includes created file" true (findEntryIndex explorer2.entries "alpha.txt").isSome
+
+      let newDirIdx := (findEntryIndex explorer.entries "[New Directory]").getD 1
+      let sExp5 := sExp4.updateActiveView fun v => { v with cursor := { row := ⟨2 + newDirIdx⟩, col := 0 } }
+      let sExp6 ← runKeys sExp5 [Key.enter]
+      assertEqual "Explorer [New Directory] opens floating input" true sExp6.floatingOverlay.isSome
+      assertEqual "Explorer [New Directory] sets command prefix" (some s!"mkdir {tmpRoot}/") sExp6.floatingInputCommand
+      let sExp7 ← runKeys sExp6 (keys "subdir" ++ [Key.enter])
+      let createdDirPath := System.FilePath.mk s!"{tmpRoot}/subdir"
+      let dirExists ← createdDirPath.pathExists
+      let dirIsDir ← if dirExists then createdDirPath.isDir else pure false
+      assertEqual "Explorer [New Directory] creates directory" true dirIsDir
+      let explorerOpt3 := sExp7.explorers.find? (fun (id, _) => id == sExp7.getActiveBuffer.id)
+      match explorerOpt3 with
+      | none =>
+          assertEqual "Explorer refreshed after directory create" true false
+      | some (_, explorer3) =>
+          assertEqual "Explorer list includes created directory" true (findEntryIndex explorer3.entries "subdir").isSome
+
+  let s16 ← runKeys s0 ([Key.char ':'] ++ keys "vs" ++ [Key.enter])
+  let ws16 := s16.getCurrentWorkspace
+  assertEqual "split creates second window" true (ws16.nextWindowId >= 2)
+
+  let s17 ← runKeys s16 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let ws17 := s17.getCurrentWorkspace
+  assertEqual ":floatwin on marks active window floating" true (ws17.isFloatingWindow ws17.activeWindowId)
+
+  let s18 ← runKeys s17 ([Key.char ':'] ++ keys "floatwin off" ++ [Key.enter])
+  let ws18 := s18.getCurrentWorkspace
+  assertEqual ":floatwin off clears floating flag" false (ws18.isFloatingWindow ws18.activeWindowId)
+
+  let s19 ← runKeys s18 ([Key.char ':'] ++ keys "floatwin" ++ [Key.enter])
+  let ws19 := s19.getCurrentWorkspace
+  assertEqual ":floatwin toggles floating flag" true (ws19.isFloatingWindow ws19.activeWindowId)
+
+  let sFloatMove0 := { s0 with windowHeight := 24, windowWidth := 80 }
+  let sFloatMove1 ← runKeys sFloatMove0 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let floatMoveId := sFloatMove1.getCurrentWorkspace.activeWindowId
+  let beforeFloatMove := sFloatMove1.getFloatingWindowBounds floatMoveId
+  let sFloatMove2 ← runKeys sFloatMove1 [Key.alt 'L']
+  let afterFloatMove := sFloatMove2.getFloatingWindowBounds floatMoveId
+  match beforeFloatMove, afterFloatMove with
+  | some (_, left0, _, _), some (_, left1, _, _) =>
+      assertEqual "Alt-Shift-l moves floating window right" (left0 + 1) left1
+  | _, _ =>
+      assertEqual "Alt-Shift-l moves floating window right" true false
+
+  let sFloatMoveGrp0 := { s0 with windowHeight := 24, windowWidth := 80 }
+  let sFloatMoveGrp1 ← runKeys sFloatMoveGrp0 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let sFloatMoveGrp2 ← runKeys sFloatMoveGrp1 ([Key.char ':'] ++ keys "vsplit" ++ [Key.enter])
+  let moveGrpIds := sFloatMoveGrp2.getCurrentWorkspace.getFloatingWindowIds.toList
+  let beforeGrp := moveGrpIds.filterMap (fun wid => (sFloatMoveGrp2.getFloatingWindowBounds wid).map (fun b => (wid, b)))
+  let sFloatMoveGrp3 ← runKeys sFloatMoveGrp2 [Key.alt 'J']
+  let afterGrp := moveGrpIds.filterMap (fun wid => (sFloatMoveGrp3.getFloatingWindowBounds wid).map (fun b => (wid, b)))
+  let movedAllDown :=
+    moveGrpIds.all (fun wid =>
+      match beforeGrp.find? (fun (id, _) => id == wid), afterGrp.find? (fun (id, _) => id == wid) with
+      | some (_, (top0, _, _, _)), some (_, (top1, _, _, _)) => top1 == top0 + 1
+      | _, _ => false)
+  assertEqual "Alt-Shift-j moves all panes in active floating subtree down" true movedAllDown
+
+  let sFloatVs0 := { s0 with windowHeight := 24, windowWidth := 80 }
+  let sFloatVs1 ← runKeys sFloatVs0 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let sFloatVs2 ← runKeys sFloatVs1 ([Key.char ':'] ++ keys "vsplit" ++ [Key.enter])
+  let wsFloatVs2 := sFloatVs2.getCurrentWorkspace
+  let floatingIdsVs := wsFloatVs2.getFloatingWindowIds.toList
+  assertEqual "vsplit in floating window keeps new pane floating" true (floatingIdsVs.length >= 2)
+  match floatingIdsVs with
+  | a :: b :: _ =>
+      let sideBySide :=
+        match sFloatVs2.getFloatingWindowBounds a, sFloatVs2.getFloatingWindowBounds b with
+        | some (t1, l1, h1, w1), some (t2, l2, h2, w2) =>
+            t1 == t2 && h1 == h2 && ((l1 + w1 == l2) || (l2 + w2 == l1))
+        | _, _ => false
+      assertEqual "vsplit in floating window keeps pair side-by-side" true sideBySide
+  | _ =>
+      assertEqual "vsplit in floating window keeps pair side-by-side" true false
+
+  let sFloatSp0 := { s0 with windowHeight := 24, windowWidth := 80 }
+  let sFloatSp1 ← runKeys sFloatSp0 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let sFloatSp2 ← runKeys sFloatSp1 ([Key.char ':'] ++ keys "split" ++ [Key.enter])
+  let wsFloatSp2 := sFloatSp2.getCurrentWorkspace
+  let floatingIdsSp := wsFloatSp2.getFloatingWindowIds.toList
+  assertEqual "split in floating window keeps new pane floating" true (floatingIdsSp.length >= 2)
+  match floatingIdsSp with
+  | a :: b :: _ =>
+      let stacked :=
+        match sFloatSp2.getFloatingWindowBounds a, sFloatSp2.getFloatingWindowBounds b with
+        | some (t1, l1, h1, w1), some (t2, l2, h2, w2) =>
+            l1 == l2 && w1 == w2 && ((t1 + h1 == t2) || (t2 + h2 == t1))
+        | _, _ => false
+      assertEqual "split in floating window keeps pair stacked" true stacked
+  | _ =>
+      assertEqual "split in floating window keeps pair stacked" true false
+
+  let sFloatMix0 := { s0 with windowHeight := 24, windowWidth := 80 }
+  let sFloatMix1 ← runKeys sFloatMix0 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let sFloatMix2 ← runKeys sFloatMix1 ([Key.char ':'] ++ keys "vsplit" ++ [Key.enter])
+  let sFloatMix3 ← runKeys sFloatMix2 ([Key.char ':'] ++ keys "split" ++ [Key.enter])
+  let wsFloatMix3 := sFloatMix3.getCurrentWorkspace
+  let floatingIdsMix := wsFloatMix3.getFloatingWindowIds.toList
+  assertEqual "vsplit then split in floating window keeps three panes floating" 3 floatingIdsMix.length
+  let boundsMix := floatingIdsMix.filterMap (fun wid => sFloatMix3.getFloatingWindowBounds wid)
+  assertEqual "vsplit then split in floating window resolves bounds for all panes" 3 boundsMix.length
+  let overlaps (a b : Nat × Nat × Nat × Nat) : Bool :=
+    let (ta, la, ha, wa) := a
+    let (tb, lb, hb, wb) := b
+    la < lb + wb && lb < la + wa && ta < tb + hb && tb < ta + ha
+  let rec hasOverlap (xs : List (Nat × Nat × Nat × Nat)) : Bool :=
+    match xs with
+    | [] => false
+    | x :: rest => rest.any (fun y => overlaps x y) || hasOverlap rest
+  assertEqual "vsplit then split in floating window panes do not overlap" false (hasOverlap boundsMix)
+
+  let sFloatDeep0 := { s0 with windowHeight := 24, windowWidth := 80 }
+  let sFloatDeep1 ← runKeys sFloatDeep0 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let sFloatDeep2 ← runKeys sFloatDeep1 ([Key.char ':'] ++ keys "vs" ++ [Key.enter])
+  let sFloatDeep3 ← runKeys sFloatDeep2 ([Key.char ':'] ++ keys "hs" ++ [Key.enter])
+  let sFloatDeep4 ← runKeys sFloatDeep3 ([Key.char ':'] ++ keys "vs" ++ [Key.enter])
+  let wsFloatDeep4 := sFloatDeep4.getCurrentWorkspace
+  let floatingIdsDeep := wsFloatDeep4.getFloatingWindowIds.toList
+  assertEqual "vs -> hs -> vs in floating window creates four panes" 4 floatingIdsDeep.length
+  let boundsDeep := floatingIdsDeep.filterMap (fun wid => sFloatDeep4.getFloatingWindowBounds wid)
+  assertEqual "vs -> hs -> vs in floating window resolves bounds for all panes" 4 boundsDeep.length
+  assertEqual "vs -> hs -> vs in floating window panes do not overlap" false (hasOverlap boundsDeep)
+  let sideBySideTouch (a b : Nat × Nat × Nat × Nat) : Bool :=
+    let (t1, l1, h1, w1) := a
+    let (t2, l2, h2, w2) := b
+    ((l1 + w1 == l2) || (l2 + w2 == l1)) && (t1 < t2 + h2 && t2 < t1 + h1)
+  let stackedTouch (a b : Nat × Nat × Nat × Nat) : Bool :=
+    let (t1, l1, h1, w1) := a
+    let (t2, l2, h2, w2) := b
+    ((t1 + h1 == t2) || (t2 + h2 == t1)) && (l1 < l2 + w2 && l2 < l1 + w1)
+  let rec hasPairWith
+      (pred : (Nat × Nat × Nat × Nat) → (Nat × Nat × Nat × Nat) → Bool)
+      (xs : List (Nat × Nat × Nat × Nat)) : Bool :=
+    match xs with
+    | [] => false
+    | x :: rest => rest.any (fun y => pred x y) || hasPairWith pred rest
+  assertEqual "vs -> hs -> vs in floating window keeps horizontal adjacency" true (hasPairWith sideBySideTouch boundsDeep)
+  assertEqual "vs -> hs -> vs in floating window keeps vertical adjacency" true (hasPairWith stackedTouch boundsDeep)
+
+  let longLine := "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  let longText := String.intercalate "\n" [longLine, longLine, longLine, longLine, longLine, longLine, longLine, longLine, longLine, longLine, longLine, longLine] ++ "\n"
+  let s20 := { s0 with windowHeight := 14, windowWidth := 40 }
+  let s21 ← runKeys s20 ([Key.char 'i'] ++ keys longText ++ [Key.esc] ++ keys "gg0")
+  let s22 ← runKeys s21 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let s23 ← runKeys s22 [Key.char '1', Key.char '0', Key.char 'j']
+  let (sRow23, _) := s23.getScroll
+  assertEqual "floating window vertical scroll follows cursor" true (sRow23.val > 0)
+
+  let s24 ← runKeys s23 [Key.char '3', Key.char '5', Key.char 'l']
+  let (_, sCol24) := s24.getScroll
+  assertEqual "floating window horizontal scroll follows cursor" true (sCol24.val > 0)
+
+  let s25 ← runKeys s0 ([Key.char 'i'] ++ keys "abcd\n" ++ [Key.esc] ++ keys "gg0")
+  let s26 ← runKeys s25 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let s27 ← runKeys s26 [Key.char 'v', Key.char 'l', Key.char 'd']
+  assertBuffer "visual mode edits active floating window buffer" s27 "cd\n"
+
+  let s28 ← runKeys s0 ([Key.char 'i'] ++ keys "abcd\nefgh\n" ++ [Key.esc] ++ keys "gg0")
+  let s29 ← runKeys s28 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
+  let s30 ← runKeys s29 [Key.char 'l', Key.char 'V', Key.char 'l', Key.char 'j', Key.char 'd']
+  assertBuffer "visual block edits active floating window buffer" s30 "ad\neh\n"
+
+def testBufferExplorerCommand : IO Unit := do
+  IO.println "  Testing Buffer Explorer..."
+  let s0 := ViE.initialState
+  let stamp ← IO.monoMsNow
+  let tmpRoot := s!"/tmp/vie-buffer-explorer-{stamp}"
+  IO.FS.createDirAll tmpRoot
+  let bufAPath := s!"{tmpRoot}/bufA.txt"
+  let bufBPath := s!"{tmpRoot}/bufB.txt"
+  IO.FS.writeFile bufAPath "alpha\n"
+  IO.FS.writeFile bufBPath "beta\n"
+  let sBuf0 := { s0 with windowHeight := 30, windowWidth := 100 }
+  let sBuf1 ← runKeys sBuf0 ([Key.char ':'] ++ keys s!"e {bufAPath}" ++ [Key.enter])
+  let sBuf2 ← runKeys sBuf1 ([Key.char ':'] ++ keys s!"e {bufBPath}" ++ [Key.enter])
+  let targetBufIdOpt := sBuf2.getCurrentWorkspace.buffers.find? (fun b => b.filename == some bufAPath) |>.map (fun b => b.id)
+  assertEqual "Buffer explorer target buffer exists" true targetBufIdOpt.isSome
+  let targetBufId := targetBufIdOpt.getD 0
+
+  let sBuf3 ← runKeys sBuf2 ([Key.char ':'] ++ keys "buf list" ++ [Key.enter])
+  assertEqual ":buf list opens buffer explorer" true ((sBuf3.getActiveBuffer.filename.getD "").startsWith "explorer://buffers")
+  let explorerBufId := sBuf3.getActiveBuffer.id
+  let explorerBufOpt := sBuf3.explorers.find? (fun (id, _) => id == explorerBufId)
+  match explorerBufOpt with
+  | none =>
+      assertEqual "Buffer explorer registered" true false
+  | some (_, explorerBuf) =>
+      let targetPath := s!"buffer://{targetBufId}"
+      let targetIdxOpt := findEntryIndexByPath explorerBuf.entries targetPath
+      assertEqual "Buffer explorer contains target buffer entry" true targetIdxOpt.isSome
+      let targetIdx := targetIdxOpt.getD 0
+      let sBuf4 := sBuf3.updateActiveView fun v => { v with cursor := { row := ⟨2 + targetIdx⟩, col := 0 } }
+      let sBuf5 ← runKeys sBuf4 [Key.enter]
+      assertEqual "Buffer explorer Enter switches active buffer" (some bufAPath) sBuf5.getActiveBuffer.filename
+      assertEqual "Buffer explorer closes after selection" false (sBuf5.explorers.any (fun (id, _) => id == explorerBufId))
+
+  let sBufCompat ← runKeys sBuf2 ([Key.char ':'] ++ keys "buffers" ++ [Key.enter])
+  assertEqual ":buffers alias opens buffer explorer" true ((sBufCompat.getActiveBuffer.filename.getD "").startsWith "explorer://buffers")
+
+  let sBufAlias ← runKeys sBuf2 ([Key.char ':'] ++ keys "ls" ++ [Key.enter])
+  assertEqual ":ls alias opens buffer explorer" true ((sBufAlias.getActiveBuffer.filename.getD "").startsWith "explorer://buffers")
+
+def testExplorerCommandAliases : IO Unit := do
+  IO.println "  Testing Explorer Command Names..."
+  let s0 := ViE.initialState
+  let stamp ← IO.monoMsNow
+  let tmpRoot := s!"/tmp/vie-ex-alias-{stamp}"
+  IO.FS.createDirAll tmpRoot
+  IO.FS.writeFile s!"{tmpRoot}/x.txt" "x\n"
+
+  let s1 ← runKeys s0 ([Key.char ':'] ++ keys s!"ex list {tmpRoot}" ++ [Key.enter])
+  assertEqual ":ex list opens file explorer" true ((s1.getActiveBuffer.filename.getD "").startsWith "explorer://")
+
+  let s2 ← runKeys s0 ([Key.char ':'] ++ keys s!"ee {tmpRoot}" ++ [Key.enter])
+  assertEqual ":ee alias opens file explorer" true ((s2.getActiveBuffer.filename.getD "").startsWith "explorer://")
+
+  let s3 ← runKeys s0 ([Key.char ':'] ++ keys "wgex" ++ [Key.enter])
+  assertEqual ":wgex alias opens workgroup explorer" (some "explorer://workgroups") s3.getActiveBuffer.filename
+
 def test : IO Unit := do
   IO.println "Starting Expanded Keybind Tests..."
   testMotions
@@ -324,6 +687,9 @@ def test : IO Unit := do
   testCommandSubstitute
   testCommandGlobal
   testCommandBloom
+  testUiCommands
+  testBufferExplorerCommand
+  testExplorerCommandAliases
   IO.println "All Expanded Keybind Tests passed!"
 
 end Test.Keybinds

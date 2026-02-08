@@ -58,6 +58,9 @@ def clearLineStr : String := "\x1b[K"
 /-- Home cursor. -/
 def homeCursorStr : String := "\x1b[H"
 
+/-- Clear entire screen. -/
+def clearScreenStr : String := "\x1b[2J"
+
 /-- Read a single byte from stdin.
     Returns none on EOF or if no input available. -/
 def readKey : IO (Option Char) := do

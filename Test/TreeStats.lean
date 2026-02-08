@@ -1,34 +1,99 @@
 import ViE.Data.PieceTable
+import Test.Utils
 
-def main : IO Unit := do
-  let iterations := 50000
-  let mut pt := ViE.PieceTable.fromString "Initial content\n"
+namespace Test.TreeStats
 
-  IO.println s!"Performing {iterations} insertions..."
+open ViE
+open Test.Utils
+
+def buildWorkload (iterations : Nat) : PieceTable := Id.run do
+  let mut pt := PieceTable.fromString "Initial content\n"
   for i in [0:iterations] do
     pt := pt.insert pt.tree.length s!"line {i}\n" pt.tree.length
-    if i % 1000 == 0 then
-      IO.println s!"Iteration {i}..."
+  return pt
 
+partial def countNodes (t : PieceTree) : Nat :=
+  match t with
+  | .empty => 0
+  | .leaf _ _ _ => 1
+  | .internal cs _ _ => 1 + cs.foldl (fun acc c => acc + countNodes c) 0
+
+partial def countLeaves (t : PieceTree) : Nat :=
+  match t with
+  | .empty => 0
+  | .leaf _ _ _ => 1
+  | .internal cs _ _ => cs.foldl (fun acc c => acc + countLeaves c) 0
+
+partial def maxLeafPieces (t : PieceTree) : Nat :=
+  match t with
+  | .empty => 0
+  | .leaf ps _ _ => ps.size
+  | .internal cs _ _ => cs.foldl (fun acc c => max acc (maxLeafPieces c)) 0
+
+partial def maxInternalChildren (t : PieceTree) : Nat :=
+  match t with
+  | .empty => 0
+  | .leaf _ _ _ => 0
+  | .internal cs _ _ =>
+      cs.foldl (fun acc c => max acc (maxInternalChildren c)) cs.size
+
+def parseIterations (args : List String) : Nat :=
+  let args :=
+    match args with
+    | "--" :: rest => rest
+    | _ => args
+  match args with
+  | a :: _ =>
+      match a.toNat? with
+      | some n => n
+      | none => 5000
+  | [] => 5000
+
+def report (pt : PieceTable) (iterations : Nat) : IO Unit := do
   let tree := pt.tree
-  match tree with
-  | .empty => IO.println "Tree is empty"
-  | .leaf ps _ => IO.println s!"Tree is a single leaf with {ps.size} pieces"
-  | .internal cs s =>
-    IO.println s!"Tree is internal with {cs.size} children at root"
-    IO.println s!"Tree height: {s.height}"
+  let h := PieceTree.height tree
+  let nodes := countNodes tree
+  let leaves := countLeaves tree
+  let maxLeaf := maxLeafPieces tree
+  let maxChildren := maxInternalChildren tree
+  IO.println s!"iterations={iterations}"
+  IO.println s!"bytes={PieceTree.length tree} lines={PieceTree.lineBreaks tree} height={h}"
+  IO.println s!"nodes={nodes} leaves={leaves} maxLeafPieces={maxLeaf} maxChildren={maxChildren}"
 
-    -- Check if children are also flat
-    let mut maxChildSize := 0
-    for c in cs do
-      match c with
-      | .internal cs2 _ => maxChildSize := max maxChildSize cs2.size
-      | .leaf ps _ => maxChildSize := max maxChildSize ps.size
-      | .empty => continue
-    IO.println s!"Max child size at level 1: {maxChildSize}"
+  match tree with
+  | .empty => IO.println "root=empty"
+  | .leaf ps _ _ => IO.println s!"root=leaf pieces={ps.size}"
+  | .internal cs _ _ => IO.println s!"root=internal children={cs.size}"
 
   if iterations > 0 then
     let start := ← IO.monoMsNow
     let _ := pt.getLineRange (iterations - 1)
-    let endT := ← IO.monoMsNow
-    IO.println s!"Time to getLineRange for last line: {endT - start}ms"
+    let stop := ← IO.monoMsNow
+    IO.println s!"getLineRange(last)={stop - start}ms"
+
+def test : IO Unit := do
+  IO.println "Starting TreeStats Test..."
+  let iterations := 3000
+  let pt := buildWorkload iterations
+  let t := pt.tree
+  let bytes := PieceTree.length t
+  let textBytes := pt.toString.toUTF8.size
+  let isNonEmpty :=
+    match t with
+    | .empty => false
+    | _ => true
+
+  assertEqual "tree length equals rendered bytes" textBytes bytes
+  assert "tree is non-empty" isNonEmpty
+  assert "tree height is at least 2 after workload" (PieceTree.height t >= 2)
+  assert "leaf piece count stays within node capacity" (maxLeafPieces t <= NodeCapacity)
+  assert "internal children stay within node capacity" (maxInternalChildren t <= NodeCapacity)
+  assert "line range for last inserted line exists" ((pt.getLineRange (iterations - 1)).isSome)
+  IO.println "TreeStats Test passed!"
+
+def main (args : List String) : IO Unit := do
+  let iterations := parseIterations args
+  let pt := buildWorkload iterations
+  report pt iterations
+
+end Test.TreeStats

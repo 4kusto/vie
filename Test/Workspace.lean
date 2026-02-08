@@ -28,7 +28,7 @@ def switchWorkspace (state : EditorState) (idx : Nat) : EditorState :=
 def test : IO Unit := do
   IO.println "Starting Workspace Test..."
 
-  let s0 := ViE.initialState
+  let s0 := { ViE.initialState with windowHeight := 40, windowWidth := 120 }
   let wg0 := s0.getCurrentWorkgroup
   assertEqual "Initial workgroups size" 10 s0.workgroups.size
   assertEqual "Initial workgroup count" 1 wg0.workspaces.size
@@ -70,6 +70,8 @@ def test : IO Unit := do
 
   let s8 ← ViE.Command.cmdWs ["list"] s7
   assertEqual "Workspace list opens explorer buffer" (some "explorer://workgroup") s8.getActiveBuffer.filename
+  let ws8 := s8.getCurrentWorkspace
+  assertEqual "Workspace explorer opens in floating window" true (ws8.isFloatingWindow ws8.activeWindowId)
   let wsListText := s8.getActiveBuffer.table.toString
   assertEqual "Workspace list contains New Workspace entry" true (wsListText.contains "[New Workspace]")
   assertEqual "Workspace list contains Rename Workspace entry" true (wsListText.contains "[Rename Workspace]")
@@ -78,13 +80,13 @@ def test : IO Unit := do
 
   let s8a := s8.updateActiveView fun v => { v with cursor := {row := ⟨2⟩, col := 0} }
   let s8b ← ViE.Feature.handleExplorerEnter s8a
-  assertEqual "New workspace enters command mode" Mode.command s8b.mode
-  assertEqual "New workspace command prompt" "ws new " s8b.inputState.commandBuffer
+  assertEqual "New workspace opens floating input" true s8b.floatingOverlay.isSome
+  assertEqual "New workspace floating command prefix" (some "ws new ") s8b.floatingInputCommand
 
   let s8c := s8.updateActiveView fun v => { v with cursor := {row := ⟨3⟩, col := 0} }
   let s8d ← ViE.Feature.handleExplorerEnter s8c
-  assertEqual "Rename workspace enters command mode" Mode.command s8d.mode
-  assertEqual "Rename workspace command prompt" true (s8d.inputState.commandBuffer.startsWith "ws rename ")
+  assertEqual "Rename workspace opens floating input" true s8d.floatingOverlay.isSome
+  assertEqual "Rename workspace floating command prefix" (some "ws rename ") s8d.floatingInputCommand
 
   let s8e ← ViE.Command.cmdWorkspace ["rename", ""] s8
   assertEqual "Rename workspace rejects empty" "Workspace name cannot be empty" s8e.message
@@ -131,6 +133,13 @@ def test : IO Unit := do
     assertEqual "Workspace explorer preview window exists" true explorer.previewWindowId.isSome
     let previewWinId := explorer.previewWindowId.get!
     let wsPrev := s12c.getCurrentWorkspace
+    assertEqual "Workspace explorer preview window is floating" true (wsPrev.isFloatingWindow previewWinId)
+    let pairSideBySide :=
+      match s12c.getFloatingWindowBounds wsPrev.activeWindowId, s12c.getFloatingWindowBounds previewWinId with
+      | some (et, el, eh, ew), some (pt, pl, ph, pw) =>
+          et == pt && eh == ph && ((el + ew <= pl) || (pl + pw <= el))
+      | _, _ => false
+    assertEqual "Workspace explorer/preview floating pair is side-by-side" true pairSideBySide
     let previewView := wsPrev.layout.findView previewWinId |>.getD initialView
     let previewBuf := wsPrev.buffers.find? (fun b => b.id == previewView.bufferId) |>.getD initialBuffer
     let previewText := previewBuf.table.toString

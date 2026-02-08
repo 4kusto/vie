@@ -31,6 +31,7 @@ def applyMatchOffset (s : EditorState) (offset : Nat) : EditorState :=
 
 def startSearch (s : EditorState) (pattern : String) (direction : SearchDirection) (useBloom : Bool) : EditorState :=
   let cursorOffset := getCursorOffset s
+  let bufferId := s.getActiveBuffer.id
   let search : SearchState := {
     pattern := pattern
     direction := direction
@@ -39,6 +40,7 @@ def startSearch (s : EditorState) (pattern : String) (direction : SearchDirectio
     lastSearchOffset := cursorOffset
     cache := #[]
     cacheMax := 128
+    lineCacheBufferId := some bufferId
     lineMatches := Lean.RBMap.empty
     lineOrder := #[]
     lineCacheMax := 512
@@ -53,6 +55,7 @@ def startOrUpdateSearch (s : EditorState) (pattern : String) (direction : Search
   | none => startSearch s pattern direction useBloom
   | some st =>
       let cursorOffset := getCursorOffset s
+      let bufferId := s.getActiveBuffer.id
       let st' := {
         st with
           pattern := pattern
@@ -61,6 +64,7 @@ def startOrUpdateSearch (s : EditorState) (pattern : String) (direction : Search
           lastMatch := none
           lastSearchOffset := cursorOffset
           cache := #[]
+          lineCacheBufferId := some bufferId
           lineMatches := Lean.RBMap.empty
           lineOrder := #[]
       }

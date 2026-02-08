@@ -51,7 +51,7 @@ def closeActiveWindow (state : EditorState) : EditorState :=
         let newActiveId := match newIds with
           | [] => 0 -- Should not happen if layout valid
           | h :: _ => h
-        { ws with layout := newLayout, activeWindowId := newActiveId }
+        { ws with layout := newLayout, activeWindowId := newActiveId } |>.pruneFloatingWindows
 
   let activeBuf := state.getActiveBuffer
   let explorerOpt := state.explorers.find? (fun (id, _) => id == activeBuf.id)
@@ -78,6 +78,8 @@ def splitWindow (state : EditorState) (direction : Bool) : EditorState :=
   let s' := state.updateCurrentWorkspace fun ws =>
     let activeId := ws.activeWindowId
     let nextId := ws.nextWindowId
+    let activeWasFloating := ws.isFloatingWindow activeId
+    let (activeRowOff, activeColOff) := ws.getFloatingWindowOffset activeId
     let currentView := ws.layout.findView activeId |>.getD initialView
     let newView := currentView
 
@@ -91,9 +93,39 @@ def splitWindow (state : EditorState) (direction : Bool) : EditorState :=
       | Layout.hsplit left right r => Layout.hsplit (updateLayout left) (updateLayout right) r
       | Layout.vsplit top bottom r => Layout.vsplit (updateLayout top) (updateLayout bottom) r
 
-    { ws with layout := updateLayout ws.layout, nextWindowId := nextId + 1 }
+    let ws' := { ws with layout := updateLayout ws.layout, nextWindowId := nextId + 1 }
+    let ws' :=
+      if activeWasFloating then
+        (ws'.setWindowFloating nextId true).setFloatingWindowOffset nextId activeRowOff activeColOff
+      else
+        ws'
+    ws'.pruneFloatingWindows
 
   { s' with message := "Split window" }
+
+def nudgeActiveFloatingWindow (state : EditorState) (dir : Direction) (step : Int := 1) : EditorState :=
+  let ws := state.getCurrentWorkspace
+  let activeId := ws.activeWindowId
+  if !ws.isFloatingWindow activeId then
+    { state with message := "active window is not floating" }
+  else
+    match ws.findFloatingSubtree activeId with
+    | none => { state with message := "floating window subtree not found" }
+    | some subtree =>
+      let ids := ViE.Window.getWindowIds subtree
+      let dRow : Int :=
+        match dir with
+        | .up => -step
+        | .down => step
+        | _ => 0
+      let dCol : Int :=
+        match dir with
+        | .left => -step
+        | .right => step
+        | _ => 0
+      let s' := state.updateCurrentWorkspace fun ws =>
+        ids.foldl (fun acc wid => acc.adjustFloatingWindowOffset wid dRow dCol) ws
+      { s' with dirty := true, message := "floating window moved" }
 
 /-- Result of resize operation: None (not found), Some (layout, handled) -/
 abbrev ResizeResult := Option (Layout × Bool)
@@ -184,9 +216,8 @@ def cycleWindow (state : EditorState) : EditorState :=
       | none => { ws with activeWindowId := match ids with | [] => ws.activeWindowId | h :: _ => h }
 
 def enforceScroll (state : EditorState) : EditorState :=
-  let (h, w) := state.getActiveWindowBounds
-  -- Active window height already excludes the global status line.
-  let linesInView := if h > 0 then h else 1
+  let (h, w) := state.getActiveWindowScrollBounds
+  let linesInView := if h > 1 then h - 1 else 1
 
   -- Vertical Scroll
   let (sRow, sCol) := state.getScroll
@@ -196,7 +227,7 @@ def enforceScroll (state : EditorState) : EditorState :=
     if cursor.row.val < sRow.val then
       state.setScroll cursor.row sCol
     else if cursor.row.val >= sRow.val + linesInView then
-      let newScrollRow : Row := ⟨cursor.row.val - (linesInView - 1)⟩
+      let newScrollRow : Row := ⟨cursor.row.val - linesInView + 1⟩
       state.setScroll newScrollRow sCol
     else
       state
@@ -212,7 +243,7 @@ def enforceScroll (state : EditorState) : EditorState :=
     if cursor.col.val < sCol.val then
       state.setScroll sRow cursor.col
     else if cursor.col.val >= sCol.val + colsInView then
-      let newScrollCol : Col := ⟨sCol.val + colsInView - 1⟩
+      let newScrollCol : Col := ⟨cursor.col.val - colsInView + 1⟩
       state.setScroll sRow newScrollCol
     else
       state

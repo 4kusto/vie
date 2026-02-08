@@ -143,6 +143,7 @@ structure SearchState where
   lastSearchOffset : Nat
   cache : Array Nat
   cacheMax : Nat
+  lineCacheBufferId : Option Nat := none
   lineMatches : Lean.RBMap Row (String × Array (Nat × Nat)) compare
   lineOrder : Array Row
   lineCacheMax : Nat
@@ -260,6 +261,7 @@ inductive ExplorerMode where
   | files
   | workgroups
   | workspaces
+  | buffers
   deriving Repr, Inhabited, BEq
 
 structure ExplorerState where
@@ -271,6 +273,13 @@ structure ExplorerState where
   previewBufferId : Option Nat
   deriving Repr, Inhabited
 
+structure FloatingOverlay where
+  title : String
+  lines : Array String
+  maxWidth : Nat := 0
+  cursorRow : Nat := 0
+  cursorCol : Nat := 0
+  deriving Repr, Inhabited
 
 inductive Layout where
   | window (id : Nat) (view : ViewState)
@@ -300,6 +309,8 @@ structure WorkspaceState where
   layout : Layout
   activeWindowId : Nat
   nextWindowId : Nat
+  floatingWindows : List Nat := []
+  floatingWindowOffsets : List (Nat × Int × Int) := []
   deriving Repr, Inhabited
 
 /-- State for a single workgroup (collection of workspaces). -/
@@ -322,6 +333,8 @@ structure EditorState where
   selectionStart : Option Point -- Visual mode anchor
   explorers : List (Nat × ExplorerState) -- BufferId × Explorer state
   searchState : Option SearchState
+  floatingOverlay : Option FloatingOverlay
+  floatingInputCommand : Option String := none
   -- Temporary input state
   inputState : InputState
   -- UI dimensions (updated frequently)

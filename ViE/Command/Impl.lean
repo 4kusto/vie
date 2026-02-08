@@ -85,6 +85,117 @@ def cmdBloom (args : List String) (state : EditorState) : IO EditorState := do
 def cmdNoHighlight (_ : List String) (state : EditorState) : IO EditorState :=
   return { state with searchState := none, message := "search highlight cleared" }
 
+def cmdRedraw (_ : List String) (state : EditorState) : IO EditorState :=
+  let s1 := state.updateCurrentWorkspace fun ws =>
+    { ws with buffers := ws.buffers.map FileBuffer.clearCache }
+  let s2 :=
+    match s1.searchState with
+    | some ss =>
+        { s1 with
+            searchState := some {
+              ss with
+                lineMatches := Lean.RBMap.empty
+                lineOrder := #[]
+            }
+        }
+    | none => s1
+  return { s2 with dirty := true, message := "redraw" }
+
+def floatUsage : String :=
+  "Usage: :float [--title <title>|--title=<title>] [--width <cols>|--width=<cols>] <text> | :float clear"
+
+def parsePositiveNat (s : String) : Option Nat :=
+  match s.toNat? with
+  | some n => if n > 0 then some n else none
+  | none => none
+
+partial def parseFloatArgs
+  (args : List String)
+  (title : String)
+  (maxWidth : Nat)
+  (textRev : List String)
+  : Except String (String × Nat × List String) :=
+  match args with
+  | [] =>
+      .ok (title, maxWidth, textRev.reverse)
+  | "--" :: rest =>
+      .ok (title, maxWidth, textRev.reverse ++ rest)
+  | "--title" :: t :: rest =>
+      parseFloatArgs rest t maxWidth textRev
+  | "--title" :: [] =>
+      .error floatUsage
+  | "--width" :: w :: rest =>
+      match parsePositiveNat w with
+      | some n => parseFloatArgs rest title n textRev
+      | none => .error s!"Invalid float width: {w}"
+  | "--width" :: [] =>
+      .error floatUsage
+  | tok :: rest =>
+      if tok.startsWith "--title=" then
+        parseFloatArgs rest (tok.drop 8 |>.toString) maxWidth textRev
+      else if tok.startsWith "--width=" then
+        let w := (tok.drop 8).toString
+        match parsePositiveNat w with
+        | some n => parseFloatArgs rest title n textRev
+        | none => .error s!"Invalid float width: {w}"
+      else
+        parseFloatArgs rest title maxWidth (tok :: textRev)
+
+def cmdFloat (args : List String) (state : EditorState) : IO EditorState := do
+  if args == ["clear"] then
+    return { state with floatingOverlay := none, floatingInputCommand := none, dirty := true, message := "floating overlay cleared" }
+  match parseFloatArgs args "Float" 0 [] with
+  | .error msg =>
+      return { state with message := msg }
+  | .ok (titleRaw, maxWidth, textTokens) =>
+      let raw := (String.intercalate " " textTokens).trimAscii.toString
+      if raw.isEmpty then
+        return { state with message := floatUsage }
+      else
+        let title := titleRaw.trimAscii.toString
+        let lines := (raw.splitOn "\\n").toArray
+        let lines := if lines.isEmpty then #[""] else lines
+        let lastRow := lines.size - 1
+        let lastCol := (lines[lastRow]!.toList.length)
+        let overlay : FloatingOverlay := {
+          title := if title.isEmpty then "Float" else title
+          lines := lines
+          maxWidth := maxWidth
+          cursorRow := lastRow
+          cursorCol := lastCol
+        }
+        return { state with floatingOverlay := some overlay, floatingInputCommand := none, dirty := true, message := "floating overlay shown" }
+
+def cmdNoFloat (_ : List String) (state : EditorState) : IO EditorState :=
+  return { state with floatingOverlay := none, floatingInputCommand := none, dirty := true, message := "floating overlay cleared" }
+
+def cmdFloatWin (args : List String) (state : EditorState) : IO EditorState := do
+  let usage := "Usage: :floatwin [toggle|on|off|clear]"
+  let activeId := state.getCurrentWorkspace.activeWindowId
+  let s' := state.updateCurrentWorkspace fun ws =>
+    let ws := ws.pruneFloatingWindows
+    match args with
+    | [] => ws.toggleWindowFloating activeId
+    | ["toggle"] => ws.toggleWindowFloating activeId
+    | ["on"] => ws.setWindowFloating activeId true
+    | ["off"] => ws.setWindowFloating activeId false
+    | ["clear"] => { ws with floatingWindows := [], floatingWindowOffsets := [] }
+    | _ => ws
+  let ws' := s'.getCurrentWorkspace
+  let isFloating := ws'.isFloatingWindow activeId
+  let msg :=
+    match args with
+    | _ :: _ =>
+        if args == ["clear"] then "floating windows cleared"
+        else if args == ["on"] then s!"window {activeId} floating on"
+        else if args == ["off"] then s!"window {activeId} floating off"
+        else if args == ["toggle"] then
+          if isFloating then s!"window {activeId} floating on" else s!"window {activeId} floating off"
+        else usage
+    | [] =>
+        if isFloating then s!"window {activeId} floating on" else s!"window {activeId} floating off"
+  return { s' with dirty := true, message := msg }
+
 def cmdWincmd (args : List String) (state : EditorState) : IO EditorState :=
   match args with
   | ["w"] => return ViE.Window.cycleWindow state
@@ -155,24 +266,31 @@ def cmdWg (args : List String) (state : EditorState) : IO EditorState :=
   | ["list"] =>
     ViE.Feature.openWorkgroupExplorer state
   | ["new"] =>
-    let name := s!"Group {state.workgroups.size}"
-    let nextBufId := state.workgroups.foldl (fun m g =>
-      g.workspaces.foldl (fun m2 ws => max m2 ws.nextBufferId) m) 0
-    let newWg := createEmptyWorkgroup name nextBufId
-    let newState := { state with
-      workgroups := state.workgroups.push newWg,
-      currentGroup := state.workgroups.size -- switch to new one using the size before push
-    }
-    return { newState with message := s!"Created workgroup: {name}" }
+    if state.mode == .command then
+      return ViE.Feature.openNameInputFloat state "New Workgroup" "" "wg new "
+    else
+      let name := s!"Group {state.workgroups.size}"
+      let nextBufId := state.workgroups.foldl (fun m g =>
+        g.workspaces.foldl (fun m2 ws => max m2 ws.nextBufferId) m) 0
+      let newWg := createEmptyWorkgroup name nextBufId
+      let newState := { state with
+        workgroups := state.workgroups.push newWg,
+        currentGroup := state.workgroups.size -- switch to new one using the size before push
+      }
+      return { newState with message := s!"Created workgroup: {name}" }
   | ["new", name] =>
-    let nextBufId := state.workgroups.foldl (fun m g =>
-      g.workspaces.foldl (fun m2 ws => max m2 ws.nextBufferId) m) 0
-    let newWg := createEmptyWorkgroup name nextBufId
-    let newState := { state with
-      workgroups := state.workgroups.push newWg,
-      currentGroup := state.workgroups.size
-    }
-    return { newState with message := s!"Created workgroup: {name}" }
+    let trimmed := name.trimAscii.toString
+    if trimmed.isEmpty then
+      return { state with message := "Workgroup name cannot be empty" }
+    else
+      let nextBufId := state.workgroups.foldl (fun m g =>
+        g.workspaces.foldl (fun m2 ws => max m2 ws.nextBufferId) m) 0
+      let newWg := createEmptyWorkgroup trimmed nextBufId
+      let newState := { state with
+        workgroups := state.workgroups.push newWg,
+        currentGroup := state.workgroups.size
+      }
+      return { newState with message := s!"Created workgroup: {trimmed}" }
   | ["close"] =>
     if state.workgroups.size <= 1 then
       return { state with message := "Cannot close the last workgroup" }
@@ -262,31 +380,42 @@ def cmdWs (args : List String) (state : EditorState) : IO EditorState :=
     | none =>
       return { state with message := "Usage: :ws open [--name <name>] <path>" }
   | ["new"] =>
-    let name := s!"Workspace {wg.workspaces.size}"
-    let newWs := makeWorkspaceState name none maxBufId
-    let newState := state.updateCurrentWorkgroup fun wg =>
-      { wg with
-        workspaces := wg.workspaces.push newWs,
-        currentWorkspace := wg.workspaces.size
-      }
-    return { newState with message := s!"Created workspace: {name}" }
+    if state.mode == .command then
+      return ViE.Feature.openNameInputFloat state "New Workspace" "" "ws new "
+    else
+      let name := s!"Workspace {wg.workspaces.size}"
+      let newWs := makeWorkspaceState name none maxBufId
+      let newState := state.updateCurrentWorkgroup fun wg =>
+        { wg with
+          workspaces := wg.workspaces.push newWs,
+          currentWorkspace := wg.workspaces.size
+        }
+      return { newState with message := s!"Created workspace: {name}" }
   | ["new", name] =>
-    let newWs := makeWorkspaceState name none maxBufId
-    let newState := state.updateCurrentWorkgroup fun wg =>
-      { wg with
-        workspaces := wg.workspaces.push newWs,
-        currentWorkspace := wg.workspaces.size
-      }
-    return { newState with message := s!"Created workspace: {name}" }
+    let trimmed := name.trimAscii.toString
+    if trimmed.isEmpty then
+      return { state with message := "Workspace name cannot be empty" }
+    else
+      let newWs := makeWorkspaceState trimmed none maxBufId
+      let newState := state.updateCurrentWorkgroup fun wg =>
+        { wg with
+          workspaces := wg.workspaces.push newWs,
+          currentWorkspace := wg.workspaces.size
+        }
+      return { newState with message := s!"Created workspace: {trimmed}" }
   | ["new", name, path] =>
+    let trimmed := name.trimAscii.toString
+    if trimmed.isEmpty then
+      return { state with message := "Workspace name cannot be empty" }
+    else
     let absPath := resolvePath path
-    let newWs := makeWorkspaceState name (some absPath) maxBufId
-    let newState := state.updateCurrentWorkgroup fun wg =>
-      { wg with
-        workspaces := wg.workspaces.push newWs,
-        currentWorkspace := wg.workspaces.size
-      }
-    return { newState with message := s!"Created workspace: {name} ({absPath})" }
+      let newWs := makeWorkspaceState trimmed (some absPath) maxBufId
+      let newState := state.updateCurrentWorkgroup fun wg =>
+        { wg with
+          workspaces := wg.workspaces.push newWs,
+          currentWorkspace := wg.workspaces.size
+        }
+      return { newState with message := s!"Created workspace: {trimmed} ({absPath})" }
   | ["close"] =>
     if wg.workspaces.size <= 1 then
       return { state with message := "Cannot close the last workspace" }
@@ -342,15 +471,99 @@ def cmdWs (args : List String) (state : EditorState) : IO EditorState :=
     return { state with message := s!"Current workspace: {ws.name} (index {wg.currentWorkspace})" }
   | _ => return { state with message := "Usage: :ws <new|open|list|close|rename|next|prev|index> [args]" }
 
-def cmdExplorer (args : List String) (state : EditorState) : IO EditorState :=
-  let path := match args with
-     | [] => state.getCurrentWorkspace.rootPath.getD "."
-     | [p] => p
-     | _ => "."
-  ViE.Feature.openExplorer state path
+def refreshActiveFileExplorer (state : EditorState) : IO EditorState := do
+  let buf := state.getActiveBuffer
+  match state.explorers.find? (fun (id, _) => id == buf.id) with
+  | none => return state
+  | some (_, explorer) =>
+      if explorer.mode == .files then
+        ViE.Feature.openExplorerWithPreview state explorer.currentPath explorer.previewWindowId explorer.previewBufferId
+      else
+        return state
 
-def cmdWgExplorer (_ : List String) (state : EditorState) : IO EditorState :=
-  ViE.Feature.openWorkgroupExplorer state
+def resolveCommandPath (state : EditorState) (path : String) : String :=
+  if path.startsWith "/" then path else state.getCurrentWorkspace.resolvePath path
+
+def cmdMkfile (args : List String) (state : EditorState) : IO EditorState := do
+  match args with
+  | [rawPath] =>
+      let path := (resolveCommandPath state rawPath).trimAscii.toString
+      let leaf := (System.FilePath.fileName path).getD ""
+      if path.isEmpty || leaf.isEmpty then
+        return { state with message := "File name cannot be empty" }
+      else
+        let fp := System.FilePath.mk path
+        try
+          if ← fp.pathExists then
+            return { state with message := s!"File already exists: {path}" }
+          else
+            match fp.parent with
+            | some p => IO.FS.createDirAll p
+            | none => pure ()
+            IO.FS.writeFile path ""
+            let refreshed ← refreshActiveFileExplorer state
+            return { refreshed with message := s!"Created file: {path}" }
+        catch e =>
+          return { state with message := s!"Error creating file: {e}" }
+  | _ =>
+      return { state with message := "Usage: :mkfile <path>" }
+
+def cmdMkdir (args : List String) (state : EditorState) : IO EditorState := do
+  match args with
+  | [rawPath] =>
+      let path := (resolveCommandPath state rawPath).trimAscii.toString
+      let leaf := (System.FilePath.fileName path).getD ""
+      if path.isEmpty || leaf.isEmpty then
+        return { state with message := "Directory name cannot be empty" }
+      else
+        let fp := System.FilePath.mk path
+        try
+          if ← fp.pathExists then
+            if ← fp.isDir then
+              return { state with message := s!"Directory already exists: {path}" }
+            else
+              return { state with message := s!"File already exists: {path}" }
+          else
+            IO.FS.createDirAll path
+            let refreshed ← refreshActiveFileExplorer state
+            return { refreshed with message := s!"Created directory: {path}" }
+        catch e =>
+          return { state with message := s!"Error creating directory: {e}" }
+  | _ =>
+      return { state with message := "Usage: :mkdir <path>" }
+
+def cmdEx (args : List String) (state : EditorState) : IO EditorState :=
+  match args with
+  | [] =>
+      ViE.Feature.openExplorer state (state.getCurrentWorkspace.rootPath.getD ".")
+  | ["list"] =>
+      ViE.Feature.openExplorer state (state.getCurrentWorkspace.rootPath.getD ".")
+  | ["list", path] =>
+      ViE.Feature.openExplorer state path
+  | [path] =>
+      ViE.Feature.openExplorer state path
+  | _ =>
+      return { state with message := "Usage: :ex [list [path]]" }
+
+def cmdExplorer (args : List String) (state : EditorState) : IO EditorState :=
+  cmdEx args state
+
+def cmdBuf (args : List String) (state : EditorState) : IO EditorState :=
+  match args with
+  | [] => ViE.Feature.openBufferExplorer state
+  | ["list"] => ViE.Feature.openBufferExplorer state
+  | ["ls"] => ViE.Feature.openBufferExplorer state
+  | _ => return { state with message := "Usage: :buf [list|ls]" }
+
+def cmdBuffers (args : List String) (state : EditorState) : IO EditorState :=
+  match args with
+  | [] => ViE.Feature.openBufferExplorer state
+  | _ => return { state with message := "Usage: :buffers" }
+
+def cmdWgExplorer (args : List String) (state : EditorState) : IO EditorState :=
+  match args with
+  | [] => cmdWg ["list"] state
+  | _ => return { state with message := "Usage: :wgex" }
 
 def cmdReload (_ : List String) (state : EditorState) : IO EditorState := do
   let success ← ViE.Loader.buildConfig
@@ -390,11 +603,25 @@ def defaultCommandMap : CommandMap := [
   ("ws", cmdWs),
   ("pwd", cmdPwd),
   ("wg", cmdWg),
+  ("ex", cmdEx),
   ("ee", cmdExplorer),
+  ("buf", cmdBuf),
+  ("buffers", cmdBuffers),
+  ("ls", cmdBuffers),
+  ("mkfile", cmdMkfile),
+  ("mkdir", cmdMkdir),
+  ("md", cmdMkdir),
   ("wgex", cmdWgExplorer),
   ("undo", cmdUndo),
   ("u", cmdUndo),
   ("redo", cmdRedo),
+  ("redraw", cmdRedraw),
+  ("redraw!", cmdRedraw),
+  ("float", cmdFloat),
+  ("nofloat", cmdNoFloat),
+  ("floatwin", cmdFloatWin),
+  ("winfloat", cmdFloatWin),
+  ("wfloat", cmdFloatWin),
   ("reload", cmdReload),
   ("refresh", cmdReload),
   ("bloom", cmdBloom),
