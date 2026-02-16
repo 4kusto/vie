@@ -209,6 +209,7 @@ structure FileBuffer where
   id : Nat
   filename : Option String
   dirty : Bool
+  loaded : Bool := true
   table : PieceTable
   missingEol : Bool
   cache : RenderCache
@@ -217,7 +218,7 @@ structure FileBuffer where
 -- Manual Repr instance
 instance : Repr FileBuffer where
   reprPrec buf _ :=
-    s!"FileBuffer(id={buf.id}, file={buf.filename}, dirty={buf.dirty}, lines={buf.table.lineCount})"
+    s!"FileBuffer(id={buf.id}, file={buf.filename}, dirty={buf.dirty}, loaded={buf.loaded}, lines={buf.table.lineCount})"
 
 def initialFileBuffer : FileBuffer := {
   id := 0
@@ -270,6 +271,7 @@ structure ExplorerState where
   mode : ExplorerMode
   previewWindowId : Option Nat
   previewBufferId : Option Nat
+  targetWindowId : Option Nat := none
   deriving Repr, Inhabited
 
 structure FloatingOverlay where

@@ -61,7 +61,6 @@ def parseArgs (args : List String) : BenchOptions :=
         | none => loop opts rest
   loop {} args
 
-/-- Simple timer helper -/
 def timeCase (label : String) (iterations : Nat) (f : IO Unit) : IO Unit := do
   let t0 ← IO.monoMsNow
   f
@@ -173,9 +172,115 @@ def benchRender (iterations : Nat) : IO Unit := do
     s := s.insertChar 'a'
   let _ ← ViE.UI.render s
 
+/-- Generate large text content of specified size (in bytes). -/
+def buildLargeText (sizeBytes : Nat) : String :=
+  let lineLen := 80
+  let line := String.ofList (List.replicate lineLen 'a') ++ "\n"
+  let lineBytes := line.utf8ByteSize
+  let numLines := sizeBytes / lineBytes
+  String.intercalate "" (List.replicate numLines line)
+
+/-- Case: Load large file (1MB). -/
+def benchLoadLarge1MB (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (1024 * 1024)  -- 1MB
+  let _ := PieceTable.fromString text buildLeafBits
+  pure ()
+
+/-- Case: Load large file (10MB). -/
+def benchLoadLarge10MB (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (10 * 1024 * 1024)  -- 10MB
+  let _ := PieceTable.fromString text buildLeafBits
+  pure ()
+
+/-- Case: Load large file (100MB). -/
+def benchLoadLarge100MB (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (100 * 1024 * 1024)  -- 100MB
+  let _ := PieceTable.fromString text buildLeafBits
+  pure ()
+
+/-- Case: Insert at middle of large file (1MB). -/
+def benchInsertMidLarge1MB (iterations : Nat) (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (1024 * 1024)
+  let pt := PieceTable.fromString text buildLeafBits
+  let midOffset := pt.tree.stats.bytes.toNat / 2
+  let mut checksum := 0
+  -- Consume split results so optimizer cannot erase this loop.
+  for _ in [0:iterations] do
+    let (l, r) := PieceTree.split pt.tree midOffset pt
+    checksum := checksum + l.stats.bytes.toNat + r.stats.bytes.toNat
+  if checksum == 0 then
+    IO.println "Zero bytes?"
+
+/-- Case: Insert at middle of large file (10MB). -/
+def benchInsertMidLarge10MB (iterations : Nat) (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (10 * 1024 * 1024)
+  let pt := PieceTable.fromString text buildLeafBits
+  let midOffset := pt.tree.stats.bytes.toNat / 2
+  let mut checksum := 0
+  -- Consume split results so optimizer cannot erase this loop.
+  for _ in [0:iterations] do
+    let (l, r) := PieceTree.split pt.tree midOffset pt
+    checksum := checksum + l.stats.bytes.toNat + r.stats.bytes.toNat
+  if checksum == 0 then
+    IO.println "Zero bytes?"
+
+/-- Case: Split operation on large file (1MB). -/
+def benchSplitLarge1MB (iterations : Nat) (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (1024 * 1024)
+  let pt := PieceTable.fromString text buildLeafBits
+  let midOffset := pt.tree.stats.bytes.toNat / 2
+  let mut checksum := 0
+  for _ in [0:iterations] do
+    let (l, r) := PieceTree.split pt.tree midOffset pt
+    checksum := checksum + l.stats.bytes.toNat + r.stats.bytes.toNat
+  if checksum == 0 then
+    IO.println "Zero bytes?"
+
+/-- Case: Split operation on large file (10MB). -/
+def benchSplitLarge10MB (iterations : Nat) (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (10 * 1024 * 1024)
+  let pt := PieceTable.fromString text buildLeafBits
+  let midOffset := pt.tree.stats.bytes.toNat / 2
+  let mut checksum := 0
+  for _ in [0:iterations] do
+    let (l, r) := PieceTree.split pt.tree midOffset pt
+    checksum := checksum + l.stats.bytes.toNat + r.stats.bytes.toNat
+  if checksum == 0 then
+    IO.println "Zero bytes?"
+
+/-- Case: GetBytes operation on large file (1MB). -/
+def benchGetBytesLarge1MB (iterations : Nat) (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (1024 * 1024)
+  let pt := PieceTable.fromString text buildLeafBits
+  let chunkSize := 1024  -- 1KB chunks
+  let mut checksum := 0
+  for i in [0:iterations] do
+    let offset := (i * chunkSize) % pt.tree.stats.bytes.toNat
+    let bytes := PieceTree.getBytes pt.tree offset chunkSize pt
+    checksum := checksum + bytes.size
+  if checksum == 0 then
+    IO.println "Zero bytes?"
+
+/-- Case: GetBytes operation on large file (10MB). -/
+def benchGetBytesLarge10MB (iterations : Nat) (buildLeafBits : Bool) : IO Unit := do
+  let text := buildLargeText (10 * 1024 * 1024)
+  let pt := PieceTable.fromString text buildLeafBits
+  let chunkSize := 1024  -- 1KB chunks
+  let mut checksum := 0
+  for i in [0:iterations] do
+    let offset := (i * chunkSize) % pt.tree.stats.bytes.toNat
+    let bytes := PieceTree.getBytes pt.tree offset chunkSize pt
+    checksum := checksum + bytes.size
+  if checksum == 0 then
+    IO.println "Zero bytes?"
+
 
 def availableCases : List String :=
-  [ "insert", "edit", "clipboard", "workgroups", "windows", "undo", "search-bloom", "search-linear", "render" ]
+  [ "insert", "edit", "clipboard", "workgroups", "windows", "undo", "search-bloom", "search-linear", "render",
+    "load-1mb", "load-10mb", "load-100mb",
+    "insert-mid-1mb", "insert-mid-10mb",
+    "split-1mb", "split-10mb",
+    "getbytes-1mb", "getbytes-10mb" ]
 
 /-- Run benchmark cases. -/
 def runBenchmark (opts : BenchOptions) : IO Unit := do
@@ -210,6 +315,30 @@ def runBenchmark (opts : BenchOptions) : IO Unit := do
           timeCase "render" opts.iterations (benchRender opts.iterations)
         else
           IO.println "[bench] render skipped (--no-render)"
+    | "load-1mb" =>
+        let text := buildLargeText (1024 * 1024)
+        timeCase "load-1mb" opts.iterations (for _ in [0:opts.iterations] do
+          let pt := PieceTable.fromString text buildLeafBits
+          if pt.tree.stats.bytes == 0 then IO.println "Zero bytes?" -- force usage
+        )
+    | "load-10mb" =>
+        let text := buildLargeText (10 * 1024 * 1024)
+        timeCase "load-10mb" opts.iterations (for _ in [0:opts.iterations] do
+          let pt := PieceTable.fromString text buildLeafBits
+          if pt.tree.stats.bytes == 0 then IO.println "Zero bytes?"
+        )
+    | "load-100mb" =>
+        let text := buildLargeText (100 * 1024 * 1024)
+        timeCase "load-100mb" opts.iterations (for _ in [0:opts.iterations] do
+          let pt := PieceTable.fromString text buildLeafBits
+          if pt.tree.stats.bytes == 0 then IO.println "Zero bytes?"
+        )
+    | "insert-mid-1mb" => timeCase "insert-mid-1mb" opts.iterations (benchInsertMidLarge1MB opts.iterations buildLeafBits)
+    | "insert-mid-10mb" => timeCase "insert-mid-10mb" opts.iterations (benchInsertMidLarge10MB opts.iterations buildLeafBits)
+    | "split-1mb" => timeCase "split-1mb" opts.iterations (benchSplitLarge1MB opts.iterations buildLeafBits)
+    | "split-10mb" => timeCase "split-10mb" opts.iterations (benchSplitLarge10MB opts.iterations buildLeafBits)
+    | "getbytes-1mb" => timeCase "getbytes-1mb" opts.iterations (benchGetBytesLarge1MB opts.iterations buildLeafBits)
+    | "getbytes-10mb" => timeCase "getbytes-10mb" opts.iterations (benchGetBytesLarge10MB opts.iterations buildLeafBits)
     | other =>
         IO.println s!"[bench] Unknown case: {other}"
 

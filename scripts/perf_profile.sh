@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Configuration
-ITERATIONS=${1:-10000}
+ITERATIONS=${1:-100}
 OUTPUT_DIR=".lake/build/bin"
 BENCH_EXE="$OUTPUT_DIR/bench"
 BENCH_ARGS="${PERF_BENCH_ARGS:---no-render}"

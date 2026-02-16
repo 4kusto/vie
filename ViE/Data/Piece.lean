@@ -9,18 +9,18 @@ inductive BufferSource where
 /-- A piece descriptor pointing to a range in a source buffer -/
 structure Piece where
   source : BufferSource
-  start : Nat
-  length : Nat
-  lineBreaks : Nat
-  charCount : Nat
+  start : UInt64
+  length : UInt64
+  lineBreaks : UInt64
+  charCount : UInt64
   deriving Repr, BEq, Inhabited
 
 /-- Aggregated statistics for a node -/
 structure Stats where
-  bytes : Nat
-  lines : Nat
-  chars : Nat
-  height : Nat
+  bytes : UInt64
+  lines : UInt64
+  chars : UInt64
+  height : UInt64
   deriving Repr, Inhabited, BEq
 
 def Stats.empty : Stats := { bytes := 0, lines := 0, chars := 0, height := 0 }
@@ -33,7 +33,7 @@ instance : Add Stats where
     bytes := a.bytes + b.bytes,
     lines := a.lines + b.lines,
     chars := a.chars + b.chars,
-    height := max a.height b.height
+    height := if a.height > b.height then a.height else b.height
   }
 
 /-- B+ Tree Node Capacity (Branching Factor) -/

@@ -85,10 +85,55 @@ def testLengthAndLineCountConsistency : IO Unit := do
 
   IO.println "[PASS] length/line count remain consistent under mixed edits"
 
+def testYankPasteClearing : IO Unit := do
+  IO.println "testYankPasteClearing (yy+p reproduction)..."
+  -- Simulate: insert 25 'i' chars + newline, then yy+p 4000 times
+  let initLine := String.ofList (List.replicate 25 'i') ++ "\n"
+  let lineBytes := initLine.toUTF8.size  -- 26 bytes
+  let mut pt := PieceTable.fromString initLine
+  let mut cursorLine : Nat := 0
+
+  for step in [0:4000] do
+    -- 1. yy: read current line content via getLineRange + getBytes (like real editor)
+    let range := PieceTree.getLineRange pt.tree cursorLine pt
+    match range with
+    | none =>
+        throw <| IO.userError s!"[YankPaste] getLineRange returned none at step {step}, line {cursorLine}"
+    | some (off, len) =>
+        let yankedBytes := PieceTree.getBytes pt.tree off len pt
+        if yankedBytes.size == 0 then
+          throw <| IO.userError s!"[YankPaste] Empty yank at step {step}, line {cursorLine}, off={off} len={len}"
+
+        -- 2. p: paste below current line.
+        -- Insert after end of current line (off + len + 1 for newline)
+        let insertOffset := off + len + 1
+        let insertOffset := min insertOffset pt.length
+        let yankStr := (String.fromUTF8! yankedBytes) ++ "\n"
+        pt := pt.insert insertOffset yankStr insertOffset
+
+        -- 3. Move cursor to pasted line
+        cursorLine := cursorLine + 1
+
+    -- 4. Verify tree length
+    let expectedLen := lineBytes * (step + 2)
+    let actualLen := pt.length
+    if actualLen != expectedLen then
+      throw <| IO.userError s!"[YankPaste] Length mismatch at step {step}: expected={expectedLen} actual={actualLen}"
+
+    -- 5. Full consistency check every 500 steps
+    if step % 500 == 0 then
+      let rendered := pt.toString.toUTF8.size
+      if rendered != expectedLen then
+        throw <| IO.userError s!"[YankPaste] Rendered mismatch at step {step}: expected={expectedLen} rendered={rendered}"
+      IO.println s!"  step {step}: length={actualLen} lines={PieceTree.lineBreaks pt.tree} height={PieceTree.height pt.tree} OK"
+
+  IO.println "[PASS] yank+paste 4000 iterations with getLineRange consistent"
+
 def test : IO Unit := do
   IO.println "Starting PieceTable Stress Test..."
   testConsistency
   testLengthAndLineCountConsistency
+  testYankPasteClearing
   IO.println "PieceTable Stress Test passed!"
 
 end Test.PieceTable.Stress

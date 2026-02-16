@@ -409,8 +409,8 @@ def EditorState.undo (s : EditorState) : EditorState :=
 
   match cursorOpt with
   | some off =>
-      let (r, c) := newTable.getPointFromOffset off
-      let s'' := s'.setCursor { row := ⟨r⟩, col := ⟨c⟩ }
+      let p := ViE.getPointFromOffsetInBufferWithTabStop { buf with table := newTable } off tabStop
+      let s'' := s'.setCursor p
       { s'' with message := "Undo" }
   | none => { s' with message := "Already at oldest change" }
 
@@ -428,8 +428,8 @@ def EditorState.redo (s : EditorState) : EditorState :=
 
   match cursorOpt with
   | some off =>
-      let (r, c) := newTable.getPointFromOffset off
-      let s'' := s'.setCursor { row := ⟨r⟩, col := ⟨c⟩ }
+      let p := ViE.getPointFromOffsetInBufferWithTabStop { buf with table := newTable } off tabStop
+      let s'' := s'.setCursor p
       { s'' with message := "Redo" }
   | none => { s' with message := "Already at newest change" }
 

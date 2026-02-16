@@ -20,10 +20,10 @@ def makeBoundaryTable : PieceTable :=
   let bytes := s.toUTF8
   let pieces := (Array.range n).map fun i =>
     { source := BufferSource.original
-      start := i
-      length := 1
-      lineBreaks := 0
-      charCount := 1 }
+      start := i.toUInt64
+      length := (1 : UInt64)
+      lineBreaks := (0 : UInt64)
+      charCount := (1 : UInt64) }
   let tmp : PieceTable := {
     original := bytes
     addBuffers := #[]

@@ -111,6 +111,19 @@ def countChars (bytes : ByteArray) (start len : Nat) : Nat :=
         loop (i + 1) cnt
   loop start 0
 
+/-- Count newlines and UTF-8 characters in a byte array range in one pass. -/
+def countNewlinesAndChars (bytes : ByteArray) (start len : Nat) : Nat × Nat :=
+  let stop := start + len
+  let rec loop (i : Nat) (lines chars : Nat) : Nat × Nat :=
+    if i >= stop then
+      (lines, chars)
+    else
+      let b := bytes[i]!
+      let lines' := if b == 10 then lines + 1 else lines
+      let chars' := if (b &&& 0xC0) != 0x80 then chars + 1 else chars
+      loop (i + 1) lines' chars'
+  loop start 0 0
+
 
 /-- Convert a display column to a character index (0-based).
     If the column is in the middle of a wide character, it snaps to that character's index. -/

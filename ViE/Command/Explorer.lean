@@ -17,6 +17,20 @@ def previewMaxBytes : Nat := 65536
 def updateExplorerState (state : EditorState) (bufId : Nat) (f : ExplorerState → ExplorerState) : EditorState :=
   { state with explorers := state.explorers.map (fun (id, ex) => if id == bufId then (id, f ex) else (id, ex)) }
 
+private def isUsableExplorerTargetWindow (ws : WorkspaceState) (explorerWinId : Nat) (previewWinId : Option Nat)
+    (explorerBufIds : List Nat) (previewBufId : Option Nat) (wid : Nat) : Bool :=
+  if wid == explorerWinId then
+    false
+  else if previewWinId == some wid then
+    false
+  else
+    match ws.layout.findView wid with
+    | some v =>
+        let isExplorerBuf := explorerBufIds.contains v.bufferId
+        let isPreviewBuf := match previewBufId with | some pid => v.bufferId == pid | none => false
+        !isExplorerBuf && !isPreviewBuf
+    | none => false
+
 def openActiveAsFloating (state : EditorState) : EditorState :=
   state.updateCurrentWorkspace fun ws =>
     (ws.setWindowFloating ws.activeWindowId true).pruneFloatingWindows
@@ -488,6 +502,15 @@ def openExplorer (state : EditorState) (pathArg : String) : IO EditorState := do
     let allEntries := fileExplorerActionEntries ++ sortedEntries.toList
 
     -- Create explorer state
+    let reuseActive := state.explorers.any (fun (id, _) => id == state.getActiveBuffer.id)
+    let targetWindowId :=
+      if reuseActive then
+        match state.explorers.find? (fun (id, _) => id == state.getActiveBuffer.id) with
+        | some (_, ex) => ex.targetWindowId
+        | none => some ws.activeWindowId
+      else
+        some ws.activeWindowId
+
     let explorerState : ExplorerState := {
       currentPath := path
       entries := allEntries
@@ -495,6 +518,7 @@ def openExplorer (state : EditorState) (pathArg : String) : IO EditorState := do
       mode := .files
       previewWindowId := none
       previewBufferId := none
+      targetWindowId := targetWindowId
     }
 
     -- Generate buffer content
@@ -519,7 +543,6 @@ def openExplorer (state : EditorState) (pathArg : String) : IO EditorState := do
     let s'' := { s' with explorers := (bufferId, explorerState) :: s'.explorers }
 
     -- Open explorer in a dedicated window by default; reuse active only when already in explorer.
-    let reuseActive := state.explorers.any (fun (id, _) => id == state.getActiveBuffer.id)
     let s''' := placeExplorerInWindow s'' bufferId (defaultExplorerCursorRow explorerState.entries) reuseActive
     let s'''' := { s''' with message := s!"Explorer: {path}" }
     let s''''' := openActiveAsFloating s''''
@@ -530,7 +553,8 @@ def openExplorer (state : EditorState) (pathArg : String) : IO EditorState := do
   catch e =>
     return { state with message := s!"Error reading directory: {e}" }
 
-def openExplorerWithPreview (state : EditorState) (pathArg : String) (previewWindowId : Option Nat) (previewBufferId : Option Nat) : IO EditorState := do
+def openExplorerWithPreview (state : EditorState) (pathArg : String) (previewWindowId : Option Nat)
+    (previewBufferId : Option Nat) (targetWindowId : Option Nat) : IO EditorState := do
   let ws := state.getCurrentWorkspace
   let path := if pathArg == "." || pathArg == "" then
                 ws.rootPath.getD "."
@@ -580,6 +604,7 @@ def openExplorerWithPreview (state : EditorState) (pathArg : String) (previewWin
       mode := .files
       previewWindowId := previewWindowId
       previewBufferId := previewBufferId
+      targetWindowId := targetWindowId
     }
 
     let header := [s!"Explorer: {path}", ""]
@@ -642,6 +667,7 @@ def openWorkspaceExplorer (state : EditorState) : IO EditorState := do
     mode := .workspaces
     previewWindowId := none
     previewBufferId := none
+    targetWindowId := some state.getCurrentWorkspace.activeWindowId
   }
 
   let header := [s!"Workspace Explorer: {wg.name}", ""]
@@ -690,6 +716,7 @@ def openWorkgroupExplorer (state : EditorState) : IO EditorState := do
     mode := .workgroups
     previewWindowId := none
     previewBufferId := none
+    targetWindowId := some state.getCurrentWorkspace.activeWindowId
   }
 
   let header := ["Workgroup Explorer", ""]
@@ -746,6 +773,7 @@ def openBufferExplorer (state : EditorState) : IO EditorState := do
     mode := .buffers
     previewWindowId := none
     previewBufferId := none
+    targetWindowId := some state.getCurrentWorkspace.activeWindowId
   }
 
   let header := [s!"Buffer Explorer: {ws.name}", ""]
@@ -806,28 +834,23 @@ def handleExplorerEnter (state : EditorState) : IO EditorState := do
         return openNameInputFloat state "New Directory" "" cmdPrefix
       else if entry.isDirectory then
         -- Navigate to directory
-        openExplorerWithPreview state entry.path explorer.previewWindowId explorer.previewBufferId
+        openExplorerWithPreview state entry.path explorer.previewWindowId explorer.previewBufferId explorer.targetWindowId
       else
         let ws0 := state.getCurrentWorkspace
         let explorerWinId := ws0.activeWindowId
         let explorerBufIds := state.explorers.map (fun (id, _) => id)
         let targetWinOpt :=
-          let ids := ViE.Window.getWindowIds ws0.layout
-          ids.find? fun wid =>
-            if wid == explorerWinId then
-              false
-            else if explorer.previewWindowId == some wid then
-              false
-            else
-              match ws0.layout.findView wid with
-              | some v =>
-                  let isExplorerBuf := explorerBufIds.contains v.bufferId
-                  let isPreviewBuf :=
-                    match explorer.previewBufferId with
-                    | some pid => v.bufferId == pid
-                    | none => false
-                  !isExplorerBuf && !isPreviewBuf
-              | none => false
+          let preferred := explorer.targetWindowId
+          match preferred with
+          | some wid =>
+              if isUsableExplorerTargetWindow ws0 explorerWinId explorer.previewWindowId explorerBufIds explorer.previewBufferId wid then
+                some wid
+              else
+                let ids := ViE.Window.getWindowIds ws0.layout
+                ids.find? (fun w => isUsableExplorerTargetWindow ws0 explorerWinId explorer.previewWindowId explorerBufIds explorer.previewBufferId w)
+          | none =>
+              let ids := ViE.Window.getWindowIds ws0.layout
+              ids.find? (fun w => isUsableExplorerTargetWindow ws0 explorerWinId explorer.previewWindowId explorerBufIds explorer.previewBufferId w)
 
         -- Close preview and unregister explorer metadata.
         let s1 :=
@@ -882,18 +905,19 @@ def handleExplorerEnter (state : EditorState) : IO EditorState := do
             let explorerWinId := ws0.activeWindowId
             let explorerBufIds := state.explorers.map (fun (id, _) => id)
             let targetWinOpt :=
-              let ids := ViE.Window.getWindowIds ws0.layout
-              ids.find? fun wid =>
-                if wid == explorerWinId then
-                  false
-                else if explorer.previewWindowId == some wid then
-                  false
-                else
-                  match ws0.layout.findView wid with
-                  | some v =>
-                      let isExplorerBuf := explorerBufIds.contains v.bufferId
-                      !isExplorerBuf
-                  | none => false
+              let preferred := explorer.targetWindowId
+              let isTarget (wid : Nat) :=
+                isUsableExplorerTargetWindow ws0 explorerWinId explorer.previewWindowId explorerBufIds none wid
+              match preferred with
+              | some wid =>
+                  if isTarget wid then
+                    some wid
+                  else
+                    let ids := ViE.Window.getWindowIds ws0.layout
+                    ids.find? isTarget
+              | none =>
+                  let ids := ViE.Window.getWindowIds ws0.layout
+                  ids.find? isTarget
 
             let targetLabel :=
               match ws0.buffers.find? (fun b => b.id == targetBufId) with

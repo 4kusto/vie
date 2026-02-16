@@ -10,6 +10,7 @@ def emptyBuffer (filename : Option String) (buildLeafBits : Bool) : FileBuffer :
   id := 0
   filename := filename
   dirty := false
+  loaded := true
   table := PieceTable.fromString "" buildLeafBits
   missingEol := false
   cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
@@ -22,6 +23,7 @@ def bufferFromData (filename : String) (data : ByteArray) (buildLeafBits : Bool)
     id := 0
     filename := some filename
     dirty := false
+    loaded := true
     table := table
     missingEol := missingEol
     cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }

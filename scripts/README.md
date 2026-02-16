@@ -53,10 +53,13 @@ Purpose: heavier profiling (perf report + optional c2c) and flamegraph.
 Usage examples:
 
 ```bash
-./scripts/perf_profile.sh 10000
-PERF_MODE=both ./scripts/perf_profile.sh 10000
-PERF_MODE=c2c ./scripts/perf_profile.sh 10000
+./scripts/perf_profile.sh
+./scripts/perf_profile.sh 1000
+PERF_MODE=both ./scripts/perf_profile.sh 1000
+PERF_MODE=c2c ./scripts/perf_profile.sh 1000
 ```
+
+Default iterations for `perf_profile.sh` is `100` when omitted.
 
 ## Flamegraph Tools
 

@@ -20,6 +20,7 @@ import Test.Scroll
 import Test.Checkpoint
 import Test.SearchHighlight
 import Test.TreeStats
+import Test.SyntaxHighlight
 
 def test : IO Unit := do
   IO.println "Running all tests..."
@@ -45,6 +46,7 @@ def test : IO Unit := do
   Test.Checkpoint.test
   Test.SearchHighlight.test
   Test.TreeStats.test
+  Test.SyntaxHighlight.test
   IO.println "All tests finished."
 
 def main : IO Unit := do

@@ -409,6 +409,37 @@ def testCommandGlobal : IO Unit := do
   let s8 ← runKeys s7 ([Key.char ':'] ++ keys "v/foo/ d" ++ [Key.enter])
   assertBuffer ":v/pat/ d deletes non-matching lines" s8 "foo\n"
 
+  let s9 := ViE.initialState
+  let s10 ← runKeys s9 ([Key.char 'i'] ++ keys "a\nfoo1\nb\nfoo2\nc" ++ [Key.esc] ++ [Key.char 'g', Key.char 'g', Key.char 'j', Key.char 'j', Key.char 'j', Key.char '0'])
+  assertCursor ":g/pat/ d precondition cursor on deletable line" s10 3 0
+  let s11 ← runKeys s10 ([Key.char ':'] ++ keys "g/foo/ d" ++ [Key.enter])
+  assertBuffer ":g/pat/ d keeps expected text when cursor line is deleted" s11 "a\nb\nc"
+  assertCursor ":g/pat/ d clamps cursor when current line is deleted" s11 2 0
+
+def testCursorDriftCustomTabStop : IO Unit := do
+  IO.println "  Testing Cursor Drift (custom tabStop)..."
+  let cfg8 := { ViE.defaultConfig with tabStop := 8 }
+  let s0 := { ViE.initialState with config := cfg8 }
+
+  let s1 ← runKeys s0 ([Key.char 'i', Key.char '\t'] ++ keys "foo\n" ++ [Key.esc])
+  let s2 ← runKeys s1 [Key.char 'g', Key.char 'g', Key.char '0', Key.char 'l']
+  assertCursor "custom tabStop: l moves to first char after tab" s2 0 8
+
+  let s3 ← runKeys s2 ([Key.char ':'] ++ keys "s/foo/bar/" ++ [Key.enter])
+  assertBuffer "custom tabStop: :s updates current line" s3 "\tbar\n"
+
+  let s4 ← runKeys s3 [Key.char 'u']
+  assertBuffer "custom tabStop: undo restores text after :s" s4 "\tfoo\n"
+  assertCursor "custom tabStop: undo restores cursor col after :s" s4 0 8
+
+  let s5 ← runKeys s4 [Key.ctrl 'r']
+  assertBuffer "custom tabStop: redo reapplies :s" s5 "\tbar\n"
+  assertCursor "custom tabStop: redo restores cursor col after :s" s5 0 8
+
+  let s6 ← runKeys s2 [Key.char 'v', Key.char 'l', Key.char 'd']
+  assertBuffer "custom tabStop: visual delete uses configured offsets" s6 "\to\n"
+  assertCursor "custom tabStop: visual delete keeps cursor aligned" s6 0 8
+
 def testCommandBloom : IO Unit := do
   IO.println "  Testing Command Bloom..."
   let s0 := ViE.initialState
@@ -759,6 +790,49 @@ def testExplorerCommandAliases : IO Unit := do
   let s3 ← runKeys s0 ([Key.char ':'] ++ keys "wgex" ++ [Key.enter])
   assertEqual ":wgex alias opens workgroup explorer" (some "explorer://workgroups") s3.getActiveBuffer.filename
 
+def testExplorerOpenUsesFocusedWindow : IO Unit := do
+  IO.println "  Testing Explorer Open Target Window..."
+  let s0 := { ViE.initialState with windowHeight := 30, windowWidth := 100 }
+  let stamp ← IO.monoMsNow
+  let tmpRoot := s!"/tmp/vie-ex-target-{stamp}"
+  IO.FS.createDirAll tmpRoot
+  let leftPath := s!"{tmpRoot}/left.txt"
+  let rightPath := s!"{tmpRoot}/right.txt"
+  let targetPath := s!"{tmpRoot}/target.txt"
+  IO.FS.writeFile leftPath "left\n"
+  IO.FS.writeFile rightPath "right\n"
+  IO.FS.writeFile targetPath "target\n"
+
+  let s1 ← runKeys s0 ([Key.char ':'] ++ keys s!"e {leftPath}" ++ [Key.enter])
+  let s2 ← runKeys s1 ([Key.char ':'] ++ keys "vsplit" ++ [Key.enter])
+  let rightWinId := s2.getCurrentWorkspace.activeWindowId
+  let s3 ← runKeys s2 ([Key.char ':'] ++ keys s!"e {rightPath}" ++ [Key.enter])
+  let s4 ← runKeys s3 ([Key.char ':'] ++ keys "wincmd w" ++ [Key.enter])
+  let targetWinId := s4.getCurrentWorkspace.activeWindowId
+  assertEqual "wincmd w changes active target window" true (targetWinId != rightWinId)
+
+  let s5 ← runKeys s4 ([Key.char ':'] ++ keys s!"ex list {tmpRoot}" ++ [Key.enter])
+  let explorerBufId := s5.getActiveBuffer.id
+  let explorerOpt := s5.explorers.find? (fun (id, _) => id == explorerBufId)
+  match explorerOpt with
+  | none =>
+      assertEqual "File explorer registered" true false
+  | some (_, explorer) =>
+      let targetIdxOpt := findEntryIndex explorer.entries "target.txt"
+      assertEqual "Explorer contains target file" true targetIdxOpt.isSome
+      let targetIdx := targetIdxOpt.getD 0
+      let s6 := s5.updateActiveView fun v => { v with cursor := { row := ⟨2 + targetIdx⟩, col := 0 } }
+      let s7 ← runKeys s6 [Key.enter]
+      assertEqual "Explorer Enter uses focused window from before open" targetWinId s7.getCurrentWorkspace.activeWindowId
+      assertEqual "Selected file opens in focused window" (some targetPath) s7.getActiveBuffer.filename
+      let ws7 := s7.getCurrentWorkspace
+      match ws7.layout.findView rightWinId with
+      | none =>
+          assertEqual "Other split window still exists" true false
+      | some rightView =>
+          let rightBufName := ws7.buffers.find? (fun b => b.id == rightView.bufferId) |>.bind (fun b => b.filename)
+          assertEqual "Non-focused split keeps prior buffer" (some rightPath) rightBufName
+
 def test : IO Unit := do
   IO.println "Starting Expanded Keybind Tests..."
   testMotions
@@ -771,10 +845,12 @@ def test : IO Unit := do
   testSearch
   testCommandSubstitute
   testCommandGlobal
+  testCursorDriftCustomTabStop
   testCommandBloom
   testUiCommands
   testBufferExplorerCommand
   testExplorerCommandAliases
+  testExplorerOpenUsesFocusedWindow
   IO.println "All Expanded Keybind Tests passed!"
 
 end Test.Keybinds

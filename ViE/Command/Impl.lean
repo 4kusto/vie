@@ -477,7 +477,7 @@ def refreshActiveFileExplorer (state : EditorState) : IO EditorState := do
   | none => return state
   | some (_, explorer) =>
       if explorer.mode == .files then
-        ViE.Feature.openExplorerWithPreview state explorer.currentPath explorer.previewWindowId explorer.previewBufferId
+        ViE.Feature.openExplorerWithPreview state explorer.currentPath explorer.previewWindowId explorer.previewBufferId explorer.targetWindowId
       else
         return state
 

@@ -1,5 +1,6 @@
 import ViE.UI.Primitives
 import ViE.UI.Search
+import ViE.UI.Syntax
 import ViE.Terminal
 
 namespace ViE.UI
@@ -87,12 +88,13 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
       let selRange := if isVisual then state.selectionStart else none
       let (searchMatches, searchSt) := getLineSearchMatches currentSt buf.id lineIdx lineStr
       currentSt := searchSt
+      let syntaxSpans := ViE.UI.Syntax.highlightLine buf.filename lineStr
 
-      let needsStyled := selRange.isSome || !searchMatches.isEmpty
+      let needsStyled := selRange.isSome || !searchMatches.isEmpty || !syntaxSpans.isEmpty
       if !needsStyled then
         winBuf := winBuf.push displayLine
       else
-        let mut styleActive := false
+        let mut activeStyle : Option String := none
         let chars := displayLine.toList
         let mut dispIdx := 0
         let cursorByte :=
@@ -115,26 +117,30 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
             match activeMatch with
             | some m => overlapsByteRange m byteStart byteEnd
             | none => false
-
-          if isSelected then
-            if !styleActive then
-              winBuf := winBuf.push "\x1b[7m"
-              styleActive := true
-          else if isMatched then
-            if !styleActive then
+          let desiredStyle : Option String :=
+            if isSelected then
+              some "\x1b[7m"
+            else if isMatched then
               if isActiveMatched then
-                winBuf := winBuf.push state.config.searchHighlightCursorStyle
+                some state.config.searchHighlightCursorStyle
               else
-                winBuf := winBuf.push state.config.searchHighlightStyle
-              styleActive := true
-          else if styleActive then
-            winBuf := winBuf.push "\x1b[0m"
-            styleActive := false
+                some state.config.searchHighlightStyle
+            else
+              ViE.UI.Syntax.styleForByteRange syntaxSpans byteStart byteEnd
+
+          if desiredStyle != activeStyle then
+            match activeStyle with
+            | some _ => winBuf := winBuf.push "\x1b[0m"
+            | none => pure ()
+            match desiredStyle with
+            | some stl => winBuf := winBuf.push stl
+            | none => pure ()
+            activeStyle := desiredStyle
 
           winBuf := winBuf.push ch.toString
           dispIdx := dispIdx + chW
 
-        if styleActive then
+        if activeStyle.isSome then
           winBuf := winBuf.push "\x1b[0m"
     else
       winBuf := winBuf.push state.config.emptyLineMarker
@@ -194,30 +200,41 @@ def renderFloatingWindow
   for i in [0:innerH] do
     let lineIdx : Row := ⟨view.scrollRow.val + i⟩
     let raw := if lineIdx.val < FileBuffer.lineCount buf then getLineFromBuffer buf lineIdx |>.getD "" else ""
+    let lineIndex := ViE.Unicode.buildDisplayByteIndexWithTabStop raw st.config.tabStop
+    let syntaxSpans := ViE.UI.Syntax.highlightLine buf.filename raw
     let sub := ViE.Unicode.dropByDisplayWidthWithTabStop raw.toRawSubstring st.config.tabStop view.scrollCol.val
     let plainShown := ViE.Unicode.takeByDisplayWidthWithTabStop sub st.config.tabStop textW
     let shownW := Unicode.stringWidthWithTabStop plainShown st.config.tabStop
     let shown :=
-      if hasSelection then
+      if hasSelection || !syntaxSpans.isEmpty then
         Id.run do
           let mut styled : Array String := #[]
-          let mut styleActive := false
-          let mut dispCol := view.scrollCol.val
+          let mut activeStyle : Option String := none
+          let mut dispOffset := 0
           for ch in plainShown.toList do
             let chW := Unicode.charWidth ch
+            let dispCol := view.scrollCol.val + dispOffset
+            let byteStart := ViE.Unicode.displayColToByteOffsetFromIndex lineIndex dispCol
+            let byteEnd := ViE.Unicode.displayColToByteOffsetFromIndex lineIndex (dispCol + chW)
             let selected :=
               st.isInSelection lineIdx ⟨dispCol⟩ ||
               (chW > 1 && st.isInSelection lineIdx ⟨dispCol + 1⟩)
-            if selected then
-              if !styleActive then
-                styled := styled.push "\x1b[7m"
-                styleActive := true
-            else if styleActive then
-              styled := styled.push st.config.resetStyle
-              styleActive := false
+            let desiredStyle :=
+              if selected then
+                some "\x1b[7m"
+              else
+                ViE.UI.Syntax.styleForByteRange syntaxSpans byteStart byteEnd
+            if desiredStyle != activeStyle then
+              match activeStyle with
+              | some _ => styled := styled.push st.config.resetStyle
+              | none => pure ()
+              match desiredStyle with
+              | some stl => styled := styled.push stl
+              | none => pure ()
+              activeStyle := desiredStyle
             styled := styled.push ch.toString
-            dispCol := dispCol + chW
-          if styleActive then
+            dispOffset := dispOffset + chW
+          if activeStyle.isSome then
             styled := styled.push st.config.resetStyle
           return String.intercalate "" styled.toList
       else

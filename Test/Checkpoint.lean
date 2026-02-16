@@ -1,4 +1,5 @@
 import ViE.App
+import ViE.Buffer.Manager
 import ViE.Checkpoint
 import ViE.State.Config
 import Test.Utils
@@ -53,12 +54,38 @@ def testBuildRestoredWorkspace : IO Unit := do
   | b1 :: b2 :: _ =>
       assertEqual "Restored first file path" (some f1) b1.filename
       assertEqual "Restored second file path" (some f2) b2.filename
+      assertEqual "Restored inactive buffer is lazy" false b1.loaded
+      assertEqual "Restored active buffer is loaded" true b2.loaded
   | _ =>
       throw (IO.userError "Expected two restored buffers")
+
+  let s0 := ({ ViE.initialState with config := ViE.defaultConfig }).updateCurrentWorkspace (fun _ => ws)
+  let s1 := s0.updateCurrentWorkspace fun ws =>
+    { ws with layout := ws.layout.updateView ws.activeWindowId (fun v => { v with bufferId := 0 }) }
+  let s2 ← ViE.Buffer.ensureActiveBufferLoaded s1
+  let activeLoaded := s2.getActiveBuffer
+  assertEqual "Lazy buffer loads on activation" true activeLoaded.loaded
+  assertEqual "Lazy loaded buffer keeps file path" (some f1) activeLoaded.filename
+
+def testBuildRestoredWorkspaceCustomTabStop : IO Unit := do
+  IO.println "Starting Restored Workspace Custom TabStop Test..."
+  let stamp <- IO.monoMsNow
+  let root := s!"/tmp/vie-checkpoint-tab-{stamp}"
+  IO.FS.createDirAll root
+
+  let f1 := s!"{root}/tab.txt"
+  IO.FS.writeFile f1 "\talpha\n"
+  let settings := { ViE.defaultConfig with tabStop := 8 }
+
+  let ws <- ViE.buildRestoredWorkspace settings (some root) [f1] 0 [(0, 8)]
+  let active := ws.layout.findView ws.activeWindowId |>.getD ViE.initialView
+  assertEqual "Restored custom tabStop cursor row" 0 active.cursor.row.val
+  assertEqual "Restored custom tabStop cursor col" 8 active.cursor.col.val
 
 def test : IO Unit := do
   testLoadSessionInvalid
   testLoadSessionValid
   testBuildRestoredWorkspace
+  testBuildRestoredWorkspaceCustomTabStop
 
 end Test.Checkpoint

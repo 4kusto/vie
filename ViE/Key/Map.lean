@@ -301,7 +301,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
               let parentPath := match (System.FilePath.mk explorer.currentPath).parent with
                 | some p => p.toString
                 | none => "/"
-              ViE.Feature.openExplorerWithPreview s parentPath explorer.previewWindowId explorer.previewBufferId
+              ViE.Feature.openExplorerWithPreview s parentPath explorer.previewWindowId explorer.previewBufferId explorer.targetWindowId
             else
               handleMotion s EditorState.moveCursorLeft
           | none => pure $ clearInput (EditorState.moveCursorLeftN s s.getCount)

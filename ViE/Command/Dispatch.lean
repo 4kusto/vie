@@ -142,6 +142,10 @@ def collectMatchesInLine (pt : PieceTable) (row : Row) (pattern : ByteArray) : A
       localMatches.map (fun (s, e) => (startOff + s, startOff + e))
   | none => #[]
 
+def clampCursorToActiveBuffer (state : EditorState) : EditorState :=
+  let cursor := state.getCursor
+  state.setCursor (ViE.clampPointToActiveBuffer state cursor)
+
 def execGlobal (cmd : String) (state : EditorState) : EditorState :=
   match parseGlobal cmd with
   | none => { state with message := s!"Invalid global: {cmd}" }
@@ -171,7 +175,7 @@ def execGlobal (cmd : String) (state : EditorState) : EditorState :=
             return acc
           let newTable := buf.table.applyDeletions cursorOffset ranges
           let newBuf := { buf with table := newTable, dirty := true }
-          state.updateActiveBuffer (fun _ => newBuf)
+          clampCursorToActiveBuffer (state.updateActiveBuffer (fun _ => newBuf))
         else if subcmd.startsWith "s/" then
           match parseSubstitute subcmd with
           | none => { state with message := s!"Invalid substitute: {subcmd}" }
@@ -194,7 +198,7 @@ def execGlobal (cmd : String) (state : EditorState) : EditorState :=
                   return acc
                 let newTable := buf.table.applyReplacements cursorOffset matches1 new
                 let newBuf := { buf with table := newTable, dirty := true }
-                state.updateActiveBuffer (fun _ => newBuf)
+                clampCursorToActiveBuffer (state.updateActiveBuffer (fun _ => newBuf))
         else
           { state with message := s!"Unsupported global subcommand: {subcmd}" }
 
@@ -243,7 +247,7 @@ def execSubstitute (cmd : String) (state : EditorState) : EditorState :=
             | none => #[]
         let newTable := buf.table.applyReplacements cursorOffset matches2 new
         let newBuf := { buf with table := newTable, dirty := true }
-        state.updateActiveBuffer (fun _ => newBuf)
+        clampCursorToActiveBuffer (state.updateActiveBuffer (fun _ => newBuf))
 
 def executeCommand (commands : CommandMap) (state : EditorState) : IO EditorState := do
   let fullCmd := state.inputState.commandBuffer

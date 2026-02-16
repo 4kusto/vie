@@ -6,31 +6,46 @@ namespace ViE
 
 namespace PieceTableHelper
 
+structure AppendMeta where
+  bufferIdx : Nat
+  bufferEnd : Nat
+
 /-- Get the buffer data corresponding to a source -/
 def getBuffer (pt : ViE.PieceTable) (source : ViE.BufferSource) : ByteArray :=
   match source with
   | ViE.BufferSource.original => pt.original
   | ViE.BufferSource.add idx => pt.addBuffers.getD idx (ByteArray.mk #[])
 
-/-- Append text to add buffer, splitting into chunks if necessary -/
-def appendText (pt : ViE.PieceTable) (text : String) : (ViE.PieceTable × Array ViE.Piece) :=
+/-- Append text to add buffer, splitting into chunks if necessary. Reuses tail add buffer when possible. -/
+def appendText (pt : ViE.PieceTable) (text : String) : (ViE.PieceTable × Array ViE.Piece × AppendMeta) :=
   let bytes := text.toUTF8
   let totalSize := bytes.size
-  let bufferIdx := pt.addBuffers.size
-  let newAddBuffers := pt.addBuffers.push bytes
+  let (bufferIdx, startOff, newAddBuffers) :=
+    match pt.addBuffers.back? with
+    | some tail =>
+        if tail.size + totalSize <= ViE.AddBufferReuseLimit then
+          let idx := pt.addBuffers.size - 1
+          let startOff := tail.size
+          let merged := tail ++ bytes
+          let bufs := pt.addBuffers.set! idx merged
+          (idx, startOff, bufs)
+        else
+          let idx := pt.addBuffers.size
+          (idx, 0, pt.addBuffers.push bytes)
+    | none =>
+        (0, 0, #[bytes])
 
   let rec splitChunks (start : Nat) (acc : Array ViE.Piece) : Array ViE.Piece :=
     if start >= totalSize then acc
     else
       let len := min ViE.ChunkSize (totalSize - start)
-      let lines := ViE.Unicode.countNewlines bytes start len
-      let chars := ViE.Unicode.countChars bytes start len
+      let (lines, chars) := ViE.Unicode.countNewlinesAndChars bytes start len
       let piece : ViE.Piece := {
         source := ViE.BufferSource.add bufferIdx,
-        start := start,
-        length := len,
-        lineBreaks := lines,
-        charCount := chars
+        start := (startOff + start).toUInt64,
+        length := len.toUInt64,
+        lineBreaks := lines.toUInt64,
+        charCount := chars.toUInt64
       }
       splitChunks (start + len) (acc.push piece)
     termination_by totalSize - start
@@ -49,23 +64,22 @@ def appendText (pt : ViE.PieceTable) (text : String) : (ViE.PieceTable × Array 
       · apply Nat.min_le_right
 
   let ps := splitChunks 0 #[]
-  ({ pt with addBuffers := newAddBuffers }, ps)
+  ({ pt with addBuffers := newAddBuffers }, ps, { bufferIdx := bufferIdx, bufferEnd := startOff + totalSize })
 
 /-- Split a piece into two at a given relative offset -/
-def splitPiece (p : ViE.Piece) (offset : Nat) (pt : ViE.PieceTable) : (ViE.Piece × ViE.Piece) :=
+def splitPiece (p : ViE.Piece) (offset : UInt64) (pt : ViE.PieceTable) : (ViE.Piece × ViE.Piece) :=
   let buf := getBuffer pt p.source
   let leftLen := offset
   let rightLen := p.length - offset
 
-  let leftLines := ViE.Unicode.countNewlines buf p.start leftLen
-  let leftChars := ViE.Unicode.countChars buf p.start leftLen
+  let (leftLines, leftChars) := ViE.Unicode.countNewlinesAndChars buf p.start.toNat leftLen.toNat
 
-  let leftPiece : ViE.Piece := { p with length := leftLen, lineBreaks := leftLines, charCount := leftChars }
+  let leftPiece : ViE.Piece := { p with length := leftLen, lineBreaks := leftLines.toUInt64, charCount := leftChars.toUInt64 }
   let rightPiece : ViE.Piece := { p with
-    start := p.start + leftLen,
+    start := p.start + leftLen
     length := rightLen,
-    lineBreaks := p.lineBreaks - leftLines,
-    charCount := p.charCount - leftChars
+    lineBreaks := p.lineBreaks - leftLines.toUInt64,
+    charCount := p.charCount - leftChars.toUInt64
   }
   (leftPiece, rightPiece)
 
@@ -78,17 +92,80 @@ def stats (t : ViE.PieceTree) : ViE.Stats :=
   match t with
   | ViE.PieceTree.empty => ViE.Stats.empty
   | ViE.PieceTree.leaf _ s _ => s
-  | ViE.PieceTree.internal _ s _ => s
+  | ViE.PieceTree.internal _ s _ _ => s
 
-def length (t : ViE.PieceTree) : Nat := (stats t).bytes
-def lineBreaks (t : ViE.PieceTree) : Nat := (stats t).lines
-def height (t : ViE.PieceTree) : Nat := (stats t).height
+def length (t : ViE.PieceTree) : Nat := (stats t).bytes.toNat
+def lineBreaks (t : ViE.PieceTree) : Nat := (stats t).lines.toNat
+def height (t : ViE.PieceTree) : Nat := (stats t).height.toNat
 
 def searchMetaOf (t : ViE.PieceTree) : ViE.SearchBloom :=
   match t with
   | ViE.PieceTree.empty => ViE.SearchBloom.empty
   | ViE.PieceTree.leaf _ _ m => m
-  | ViE.PieceTree.internal _ _ m => m
+  | ViE.PieceTree.internal _ _ m _ => m
+
+/-- Compute cumulative offsets from children stats for O(log n) lookup -/
+def computeCumulativeOffsets (children : Array ViE.PieceTree) : ViE.InternalMeta :=
+  Id.run do
+    let mut cumBytes : Array UInt64 := #[0]
+    let mut cumLines : Array UInt64 := #[0]
+    let mut cumChars : Array UInt64 := #[0]
+
+    for i in [0:children.size] do
+      let child := children[i]!
+      let s := stats child
+
+      let prevBytes := cumBytes.back!
+      let prevLines := cumLines.back!
+      let prevChars := cumChars.back!
+
+      cumBytes := cumBytes.push (prevBytes + s.bytes)
+      cumLines := cumLines.push (prevLines + s.lines)
+      cumChars := cumChars.push (prevChars + s.chars)
+
+    return {
+      cumulativeBytes := cumBytes,
+      cumulativeLines := cumLines,
+      cumulativeChars := cumChars
+    }
+
+/-- Binary search to find child index containing the given byte offset -/
+def findChildForOffset (imeta : ViE.InternalMeta) (offset : UInt64) : Nat :=
+  Id.run do
+    let arr := imeta.cumulativeBytes
+    if arr.isEmpty then return 0
+    if arr.size == 1 then return 0
+
+    let mut left := 0
+    let mut right := arr.size - 2  -- Last valid child index
+
+    while left < right do
+      let mid := (left + right + 1) / 2
+      if arr[mid]! <= offset then
+        left := mid
+      else
+        right := mid - 1
+
+    return left
+
+/-- Binary search to find child index containing the given line number -/
+def findChildForLine (imeta : ViE.InternalMeta) (lineIdx : UInt64) : Nat :=
+  Id.run do
+    let arr := imeta.cumulativeLines
+    if arr.isEmpty then return 0
+    if arr.size == 1 then return 0
+
+    let mut left := 0
+    let mut right := arr.size - 2  -- Last valid child index
+
+    while left < right do
+      let mid := (left + right + 1) / 2
+      if arr[mid]! <= lineIdx then
+        left := mid
+      else
+        right := mid - 1
+
+    return left
 
 def bloomOr (a b : ByteArray) : ByteArray := Id.run do
   let mut out := a
@@ -102,7 +179,7 @@ def bloomSetBit (bloom : ByteArray) (idx : Nat) : ByteArray :=
   let bitIdx := idx % 8
   if byteIdx < bloom.size then
     let cur := bloom[byteIdx]!
-    let mask : UInt8 := UInt8.ofNat (1 <<< bitIdx)
+    let mask : UInt8 := (1 : UInt8) <<< bitIdx.toUInt8
     bloom.set! byteIdx (cur ||| mask)
   else
     bloom
@@ -112,17 +189,22 @@ def bloomGetBit (bloom : ByteArray) (idx : Nat) : Bool :=
   let bitIdx := idx % 8
   if byteIdx < bloom.size then
     let cur := bloom[byteIdx]!
-    let mask : UInt8 := UInt8.ofNat (1 <<< bitIdx)
+    let mask : UInt8 := (1 : UInt8) <<< bitIdx.toUInt8
     (cur &&& mask) != 0
   else
     false
 
+/-- Polynomial rolling hash with base 31: b0·31² + b1·31¹ + b2·31⁰.
+    Used as the first hash function for Bloom filter double-hashing. -/
 def hash1 (b0 b1 b2 : UInt8) : Nat :=
   (b0.toNat * 961 + b1.toNat * 31 + b2.toNat) % ViE.BloomBits
 
+/-- Polynomial rolling hash with base 131: b0·131² + b1·131¹ + b2·131⁰.
+    Used as the second hash function for Bloom filter double-hashing. -/
 def hash2 (b0 b1 b2 : UInt8) : Nat :=
   (b0.toNat * 17161 + b1.toNat * 131 + b2.toNat) % ViE.BloomBits
 
+/-- Add a trigram to the Bloom filter. -/
 def addTrigramToBloom (bloom : ByteArray) (b0 b1 b2 : UInt8) : ByteArray :=
   let h1 := hash1 b0 b1 b2
   let h2 := hash2 b0 b1 b2
@@ -149,7 +231,7 @@ def buildPrefixBytes (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : Array UI
   while i < pieces.size && acc.size < 2 do
     let p := pieces[i]!
     let buf := PieceTableHelper.getBuffer pt p.source
-    let slice := buf.extract p.start (p.start + p.length)
+    let slice := buf.extract p.start.toNat (p.start.toNat + p.length.toNat)
     if slice.size > 0 then
       let need := 2 - acc.size
       let take := takeFirstBytes slice.data need
@@ -164,7 +246,7 @@ def buildSuffixBytes (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : Array UI
     let idx := i - 1
     let p := pieces[idx]!
     let buf := PieceTableHelper.getBuffer pt p.source
-    let slice := buf.extract p.start (p.start + p.length)
+    let slice := buf.extract p.start.toNat (p.start.toNat + p.length.toNat)
     if slice.size > 0 then
       let need := 2 - acc.size
       let take := takeLastBytes slice.data need
@@ -186,14 +268,14 @@ def buildBloomForPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.S
   if !pt.bloomBuildLeafBits then
     let prefixBytes := buildPrefixBytes pieces pt
     let suffixBytes := buildSuffixBytes pieces pt
-    return { bits := ViE.SearchBloom.empty.bits, prefixBytes := prefixBytes, suffixBytes := suffixBytes }
+    return { bits := ViE.SearchBloom.empty.bits, prefixBytes := prefixBytes, suffixBytes := suffixBytes, hasBits := false }
   else
     let mut bits := ViE.SearchBloom.empty.bits
     let mut carry : Array UInt8 := #[]
     let mut prefixBytes : Array UInt8 := #[]
     for p in pieces do
       let buf := PieceTableHelper.getBuffer pt p.source
-      let slice := buf.extract p.start (p.start + p.length)
+      let slice := buf.extract p.start.toNat (p.start.toNat + p.length.toNat)
       if prefixBytes.size < 2 && slice.size > 0 then
         let need := 2 - prefixBytes.size
         let arr := slice.data
@@ -202,7 +284,7 @@ def buildBloomForPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.S
       let (bits', carry') := addBytesToBloom bits carry slice
       bits := bits'
       carry := carry'
-    return { bits := bits, prefixBytes := prefixBytes, suffixBytes := carry }
+    return { bits := bits, prefixBytes := prefixBytes, suffixBytes := carry, hasBits := true }
 
 def bloomIsEmpty (bloom : ByteArray) : Bool :=
   bloom.data.all (fun b => b == 0)
@@ -215,12 +297,12 @@ def combineBloom (left right : ViE.SearchBloom) : ViE.SearchBloom :=
     if right.suffixBytes.size >= 2 then right.suffixBytes
     else takeLastBytes (left.suffixBytes ++ right.suffixBytes) 2
   -- If any child bloom is empty (unknown), keep bits empty to avoid false negatives.
-  if bloomIsEmpty left.bits || bloomIsEmpty right.bits then
-    { bits := ViE.SearchBloom.empty.bits, prefixBytes := pref, suffixBytes := suf }
+  if !left.hasBits || !right.hasBits then
+    { bits := ViE.SearchBloom.empty.bits, prefixBytes := pref, suffixBytes := suf, hasBits := false }
   else
     let bits := bloomOr left.bits right.bits
     let bits := addBoundaryTrigrams bits left.suffixBytes right.prefixBytes
-    { bits := bits, prefixBytes := pref, suffixBytes := suf }
+    { bits := bits, prefixBytes := pref, suffixBytes := suf, hasBits := true }
 
 def buildBloomForChildren (children : Array ViE.PieceTree) : ViE.SearchBloom := Id.run do
   if children.isEmpty then
@@ -243,14 +325,14 @@ def patternTrigramHashes (pattern : ByteArray) : Array (Nat × Nat) := Id.run do
     hashes := hashes.push (hash1 b0 b1 b2, hash2 b0 b1 b2)
   return hashes
 
-def bloomMayContain (bloom : ByteArray) (hashes : Array (Nat × Nat)) : Bool :=
+def bloomMayContain (searchMeta : ViE.SearchBloom) (hashes : Array (Nat × Nat)) : Bool :=
   if hashes.isEmpty then
     true
-  else if bloomIsEmpty bloom then
+  else if !searchMeta.hasBits then
     -- Empty bloom means "unknown", do not prune.
     true
   else
-    hashes.all (fun (h1, h2) => bloomGetBit bloom h1 && bloomGetBit bloom h2)
+    hashes.all (fun (h1, h2) => bloomGetBit searchMeta.bits h1 && bloomGetBit searchMeta.bits h2)
 
 def cacheInsert (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (maxSize : Nat) (key : Nat) (value : ByteArray)
   : (Lean.RBMap Nat ByteArray compare × Array Nat) :=
@@ -277,40 +359,47 @@ def leafBloomBitsWithCache (pieces : Array ViE.Piece) (pt : ViE.PieceTable) (lea
 
 /-- Create a leaf node -/
 def mkLeaf (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree :=
-  let s := pieces.foldl (fun acc p => acc + (ViE.Stats.ofPiece p)) ViE.Stats.empty
-  let searchMeta := buildBloomForPieces pieces pt
-  ViE.PieceTree.leaf pieces s searchMeta
+  if pieces.size == 0 then
+    ViE.PieceTree.empty
+  else
+    let s := pieces.foldl (fun acc p => acc + (ViE.Stats.ofPiece p)) ViE.Stats.empty
+    let searchMeta := buildBloomForPieces pieces pt
+    ViE.PieceTree.leaf pieces s searchMeta
 
 /-- Create an internal node -/
 def mkInternal (children : Array ViE.PieceTree) : ViE.PieceTree :=
-  let s := children.foldl (fun acc c => acc + (stats c)) ViE.Stats.empty
-  let s := { s with height := s.height + 1 }
-  let searchMeta := buildBloomForChildren children
-  ViE.PieceTree.internal children s searchMeta
+  let validChildren := children.filter (fun c => match c with | ViE.PieceTree.empty => false | _ => true)
+  if validChildren.size == 0 then
+    ViE.PieceTree.empty
+  else
+    let s := validChildren.foldl (fun acc c => acc + (stats c)) ViE.Stats.empty
+    let s := { s with height := s.height + 1 }
+    let searchMeta := buildBloomForChildren validChildren
+    let internalMeta := computeCumulativeOffsets validChildren
+    ViE.PieceTree.internal validChildren s searchMeta internalMeta
 
 /-- Efficiently concatenate a list of pieces into a tree -/
 def fromPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree :=
-  if pieces.isEmpty then ViE.PieceTree.empty
-  else if pieces.size <= ViE.NodeCapacity then
-    mkLeaf pieces pt
+  if pieces.isEmpty then
+    ViE.PieceTree.empty
   else
-    let mid := pieces.size / 2
-    let left := fromPieces (pieces.extract 0 mid) pt
-    let right := fromPieces (pieces.extract mid pieces.size) pt
-    mkInternal #[left, right]
-  termination_by pieces.size
-  decreasing_by
-    · simp_wf
-      have hgt : ViE.NodeCapacity < pieces.size := Nat.lt_of_not_ge (by assumption)
-      have hsize : 0 < pieces.size := Nat.lt_trans (by decide : 0 < ViE.NodeCapacity) hgt
-      have hdiv : pieces.size / 2 < pieces.size := Nat.div_lt_self hsize (by decide : 1 < 2)
-      exact Nat.lt_of_le_of_lt (Nat.min_le_left _ _) hdiv
-    · simp_wf
-      have hgt : ViE.NodeCapacity < pieces.size := Nat.lt_of_not_ge (by assumption)
-      have hsize : 0 < pieces.size := Nat.lt_trans (by decide : 0 < ViE.NodeCapacity) hgt
-      have hge2 : 2 ≤ pieces.size := Nat.le_trans (by decide : 2 ≤ ViE.NodeCapacity) (Nat.le_of_lt hgt)
-      have hhalf : 0 < pieces.size / 2 := Nat.div_pos hge2 (by decide : 0 < 2)
-      exact Nat.sub_lt hsize hhalf
+    Id.run do
+      let mut leaves : Array ViE.PieceTree := #[]
+      let mut i := 0
+      while i < pieces.size do
+        let j := min (i + ViE.NodeCapacity) pieces.size
+        leaves := leaves.push (mkLeaf (pieces.extract i j) pt)
+        i := j
+      let mut level := leaves
+      while level.size > 1 do
+        let mut parents : Array ViE.PieceTree := #[]
+        let mut k := 0
+        while k < level.size do
+          let j := min (k + ViE.NodeCapacity) level.size
+          parents := parents.push (mkInternal (level.extract k j))
+          k := j
+        level := parents
+      return level[0]!
 
 /-- Flatten a tree into pieces in document order (iterative to avoid deep recursion). -/
 def toPieces (t : ViE.PieceTree) : Array ViE.Piece := Id.run do
@@ -325,7 +414,7 @@ def toPieces (t : ViE.PieceTree) : Array ViE.Piece := Id.run do
         | ViE.PieceTree.empty => pure ()
         | ViE.PieceTree.leaf pieces _ _ =>
             out := out ++ pieces
-        | ViE.PieceTree.internal children _ _ =>
+        | ViE.PieceTree.internal children _ _ _ =>
             let mut i := children.size
             while i > 0 do
               let j := i - 1
@@ -333,7 +422,80 @@ def toPieces (t : ViE.PieceTree) : Array ViE.Piece := Id.run do
               i := j
   return out
 
-/-- Concatenate two trees while maintaining B+ tree invariants. -/
+/-- Insert `node` into the right spine of `tree` at the level matching `targetHeight`.
+    Returns the merged tree, handling overflow splits. -/
+private def insertRight (tree : ViE.PieceTree) (node : ViE.PieceTree) (targetHeight : Nat) : ViE.PieceTree :=
+  Id.run do
+    -- Collect spine frames going right
+    let mut frames : Array (Array ViE.PieceTree) := #[]  -- left siblings at each level
+    let mut cur := tree
+    while height cur > targetHeight do
+      match cur with
+      | ViE.PieceTree.internal children _ _ _ =>
+          -- Save all children except the rightmost as left siblings
+          frames := frames.push (children.extract 0 (children.size - 1))
+          cur := children.back!
+      | _ => break  -- shouldn't happen if height > targetHeight
+    -- cur and node are both at targetHeight; propagate them upward as new children
+    let mut newChildren : Array ViE.PieceTree := #[cur, node]
+    -- Walk back up, rebuilding from frames
+    let mut fi := frames.size
+    while fi > 0 do
+      let j := fi - 1
+      let siblings := frames[j]!
+      let combined := siblings ++ newChildren
+      if combined.size <= ViE.NodeCapacity then
+        newChildren := #[mkInternal combined]
+      else
+        -- Split: too many children
+        let mid := combined.size / 2
+        let leftNode := mkInternal (combined.extract 0 mid)
+        let rightNode := mkInternal (combined.extract mid combined.size)
+        newChildren := #[leftNode, rightNode]
+      fi := j
+    if newChildren.size == 1 then
+      return newChildren[0]!
+    else
+      return mkInternal newChildren
+
+/-- Insert `node` into the left spine of `tree` at the level matching `targetHeight`.
+    Returns the merged tree, handling overflow splits. -/
+private def insertLeft (node : ViE.PieceTree) (tree : ViE.PieceTree) (targetHeight : Nat) : ViE.PieceTree :=
+  Id.run do
+    -- Collect spine frames going left
+    let mut frames : Array (Array ViE.PieceTree) := #[]  -- right siblings at each level
+    let mut cur := tree
+    while height cur > targetHeight do
+      match cur with
+      | ViE.PieceTree.internal children _ _ _ =>
+          -- Save all children except the leftmost as right siblings
+          frames := frames.push (children.extract 1 children.size)
+          cur := children[0]!
+      | _ => break
+    -- cur and node are both at targetHeight; propagate them upward as new children
+    let mut newChildren : Array ViE.PieceTree := #[node, cur]
+    -- Walk back up, rebuilding from frames
+    let mut fi := frames.size
+    while fi > 0 do
+      let j := fi - 1
+      let siblings := frames[j]!
+      let combined := newChildren ++ siblings
+      if combined.size <= ViE.NodeCapacity then
+        newChildren := #[mkInternal combined]
+      else
+        let mid := combined.size / 2
+        let leftNode := mkInternal (combined.extract 0 mid)
+        let rightNode := mkInternal (combined.extract mid combined.size)
+        newChildren := #[leftNode, rightNode]
+      fi := j
+    if newChildren.size == 1 then
+      return newChildren[0]!
+    else
+      return mkInternal newChildren
+
+/-- Concatenate two trees while maintaining B+ tree invariants.
+    O(log n) structural merge: walks the spine of the taller tree to find a node
+    at matching height, then inserts and propagates any overflows (splits) upward. -/
 private def concatCore (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTable) : ViE.PieceTree :=
   match l, r with
   | ViE.PieceTree.empty, _ => r
@@ -364,8 +526,27 @@ private def concatCore (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTa
       else
         r
   | _, _ =>
-      -- For mixed or internal trees, rebuild a balanced tree from in-order pieces.
-      fromPieces (toPieces l ++ toPieces r) pt
+      let lh := height l
+      let rh := height r
+      if lh == rh then
+        -- Same height: merge children to avoid unnecessary height increase
+        match l, r with
+        | ViE.PieceTree.internal cl _ _ _, ViE.PieceTree.internal cr _ _ _ =>
+            let combined := cl ++ cr
+            if combined.size <= ViE.NodeCapacity then
+              mkInternal combined
+            else
+              let mid := combined.size / 2
+              mkInternal #[mkInternal (combined.extract 0 mid), mkInternal (combined.extract mid combined.size)]
+        | _, _ =>
+            -- leaf + internal at same height (shouldn't normally happen), safe fallback
+            insertRight l r rh
+      else if lh > rh then
+        -- l is taller: walk down l's right spine to find insertion point for r
+        insertRight l r rh
+      else
+        -- r is taller: walk down r's left spine to find insertion point for l
+        insertLeft l r lh
 
 def concat (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTable) : ViE.PieceTree :=
   concatCore l r pt
@@ -377,7 +558,7 @@ private def splitCore (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) :
       return (ViE.PieceTree.empty, t)
 
     let mut node := t
-    let mut off := offset
+    let mut off : UInt64 := offset.toUInt64
     let mut frames : Array (Array ViE.PieceTree × Array ViE.PieceTree) := #[]
 
     while true do
@@ -386,7 +567,7 @@ private def splitCore (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) :
           return (ViE.PieceTree.empty, ViE.PieceTree.empty)
       | ViE.PieceTree.leaf pieces _ _ =>
           let mut i := 0
-          let mut accOffset := 0
+          let mut accOffset : UInt64 := 0
           let mut leftTree := node
           let mut rightTree := ViE.PieceTree.empty
           let mut found := false
@@ -419,23 +600,17 @@ private def splitCore (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) :
             r := mkInternal (#[r] ++ rightSibs)
             fi := j
           return (l, r)
-      | ViE.PieceTree.internal children _ _ =>
-          let mut i := 0
-          let mut accOffset := 0
-          let mut found := false
-          while i < children.size && !found do
-            let c := children[i]!
-            let cLen := length c
-            if off < accOffset + cLen then
-              frames := frames.push (children.extract 0 i, children.extract (i + 1) children.size)
-              node := c
-              off := off - accOffset
-              found := true
-            else
-              accOffset := accOffset + cLen
-              i := i + 1
-          if !found then
-            return (t, ViE.PieceTree.empty)
+      | ViE.PieceTree.internal children _ _ imeta =>
+          -- Use binary search to find the child containing the offset
+          let childIdx := findChildForOffset imeta off
+          let child := children[childIdx]!
+          let childStart := imeta.cumulativeBytes[childIdx]!
+          let relativeOffset := off - childStart
+
+          frames := frames.push (children.extract 0 childIdx, children.extract (childIdx + 1) children.size)
+          node := child
+          off := relativeOffset
+          -- Continue to next iteration
     return (t, ViE.PieceTree.empty)
 
 def split (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) : (ViE.PieceTree × ViE.PieceTree) :=
@@ -453,9 +628,9 @@ private def getBytesCore (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : Vi
     ByteArray.mk #[]
   else
     let endOffset := offset + len
-    let chunks := Id.run do
+    Id.run do
+      let mut out : ByteArray := ByteArray.mk (Array.mkEmpty len)
       let mut stack : List (ViE.PieceTree × Nat) := [(t, 0)]
-      let mut out : Array ByteArray := #[]
       let mut cursor := offset
       let mut remain := len
       while remain > 0 && !stack.isEmpty do
@@ -475,35 +650,44 @@ private def getBytesCore (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : Vi
                   let mut pieceBase := baseOffset
                   while i < pieces.size && remain > 0 do
                     let p := pieces[i]!
+                    let pLen := p.length.toNat
                     let pStart := pieceBase
-                    let pEnd := pieceBase + p.length
+                    let pEnd := pieceBase + pLen
                     if pEnd > cursor && pStart < endOffset then
                       let startInPiece := if cursor > pStart then cursor - pStart else 0
-                      let maxReadable := p.length - startInPiece
+                      let maxReadable := pLen - startInPiece
                       let untilEnd := endOffset - (pStart + startInPiece)
                       let readLen := min remain (min maxReadable untilEnd)
                       if readLen > 0 then
                         let buf := PieceTableHelper.getBuffer pt p.source
-                        let slice := buf.extract (p.start + startInPiece) (p.start + startInPiece + readLen)
-                        out := out.push slice
+                        let mut r := 0
+                        while r < readLen do
+                          out := out.push (buf[p.start.toNat + startInPiece + r]!)
+                          r := r + 1
                         cursor := cursor + readLen
                         remain := remain - readLen
-                    pieceBase := pieceBase + p.length
+                    pieceBase := pieceBase + pLen
                     i := i + 1
-              | ViE.PieceTree.internal children _ _ =>
-                  let mut i := children.size
-                  let mut childEnd := nodeEnd
-                  while i > 0 do
+              | ViE.PieceTree.internal children _ _ imeta =>
+                  -- Use binary search to find start and end child indices
+                  let relCursor : UInt64 := (if cursor > baseOffset then cursor - baseOffset else 0).toUInt64
+                  let relEnd : UInt64 := (if endOffset > baseOffset then min (endOffset - baseOffset) (nodeLen - 1) else 0).toUInt64
+                  let startChildIdx := findChildForOffset imeta relCursor
+                  let endChildIdx := findChildForOffset imeta relEnd
+
+                  -- Only process children in the relevant range
+                  let mut i := min (endChildIdx + 1) children.size
+                  while i > startChildIdx do
                     let j := i - 1
                     let child := children[j]!
-                    let childLen := length child
-                    let childStart := childEnd - childLen
+                    let childStart := baseOffset + imeta.cumulativeBytes[j]!.toNat
+                    let childEnd := if j + 1 < imeta.cumulativeBytes.size
+                                    then baseOffset + imeta.cumulativeBytes[j + 1]!.toNat
+                                    else nodeEnd
                     if childEnd > cursor && childStart < endOffset then
                       stack := (child, childStart) :: stack
-                    childEnd := childStart
                     i := j
       return out
-    chunks.foldl (fun (acc : ByteArray) (b : ByteArray) => acc ++ b) (ByteArray.mk #[])
 
 def getBytes (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : ByteArray :=
   getBytesCore t offset len pt
@@ -527,14 +711,15 @@ private def findNthNewlineLeafCore (t : ViE.PieceTree) (n : Nat) (pt : ViE.Piece
           let mut i := 0
           while i < pieces.size do
             let p := pieces[i]!
-            if currN < p.lineBreaks then
+            if currN < p.lineBreaks.toNat then
               let buf := PieceTableHelper.getBuffer pt p.source
               let mut j := 0
               let mut targetN := currN
-              let mut relOffset := p.length
+              let pLen := p.length.toNat
+              let mut relOffset := pLen
               let mut done := false
-              while j < p.length && !done do
-                if buf[p.start + j]! == 10 then
+              while j < pLen && !done do
+                if buf[p.start.toNat + j]! == 10 then
                   if targetN == 0 then
                     relOffset := j + 1
                     done := true
@@ -542,11 +727,11 @@ private def findNthNewlineLeafCore (t : ViE.PieceTree) (n : Nat) (pt : ViE.Piece
                     targetN := targetN - 1
                 j := j + 1
               return some (p, currOff, relOffset)
-            currN := currN - p.lineBreaks
-            currOff := currOff + p.length
+            currN := currN - p.lineBreaks.toNat
+            currOff := currOff + p.length.toNat
             i := i + 1
           return none
-      | ViE.PieceTree.internal children _ _ =>
+      | ViE.PieceTree.internal children _ _ _ =>
           let mut i := 0
           let mut found := false
           while i < children.size && !found do
@@ -904,15 +1089,15 @@ private def searchNextCore (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : 
                       pure ()
                     else
                       let crossesBoundary := readLen > remain
-                      if !crossesBoundary && !bloomMayContain m.bits hashes then
+                      if !crossesBoundary && !bloomMayContain m hashes then
                         pure ()
                       else
                         let bytes := getBytes t globalStart readLen pt
                         match findPatternInBytes bytes pattern 0 with
                         | some idx => return (some (globalStart + idx), cacheAcc, orderAcc)
                         | none => pure ()
-                | ViE.PieceTree.internal children _ m =>
-                    if !bloomMayContain m.bits hashes then
+                | ViE.PieceTree.internal children _ m _ =>
+                    if !bloomMayContain m hashes then
                       pure ()
                     else
                       let mut i := children.size
@@ -996,7 +1181,7 @@ private def searchPrevCore (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : 
                       pure ()
                     else
                       let crossesBoundary := globalStart < baseOffset
-                      if !crossesBoundary && !bloomMayContain m.bits hashes then
+                      if !crossesBoundary && !bloomMayContain m hashes then
                         pure ()
                       else
                         let bytes := getBytes t globalStart readLen pt
@@ -1007,8 +1192,8 @@ private def searchPrevCore (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : 
                               return (some pos, cacheAcc, orderAcc)
                             pure ()
                         | none => pure ()
-                | ViE.PieceTree.internal children _ m =>
-                    if !bloomMayContain m.bits hashes then
+                | ViE.PieceTree.internal children _ m _ =>
+                    if !bloomMayContain m hashes then
                       pure ()
                     else
                       let mut i := 0

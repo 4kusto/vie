@@ -42,16 +42,31 @@ def clampCursorInBuffer (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col :
 /-- Build startup workspace from a restored checkpoint session. -/
 def buildRestoredWorkspace (settings : EditorConfig) (workspacePath : Option String)
   (files : List String) (activeIdx : Nat) (cursors : List (Nat × Nat)) : IO WorkspaceState := do
+  let buildLeafBits := settings.searchBloomBuildLeafBits
+  let placeholderFor (id : Nat) (fname : String) : FileBuffer := {
+    id := id
+    filename := some fname
+    dirty := false
+    loaded := false
+    table := PieceTable.fromString "" buildLeafBits
+    missingEol := false
+    cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
+  }
+  let filesArr := files.toArray
+  let safeActiveIdx := if activeIdx < filesArr.size then activeIdx else 0
   let mut loaded : Array FileBuffer := #[]
-  let mut nextId := 0
-  for fname in files do
-    let buf ← loadBufferByteArrayWithConfig fname settings
-    loaded := loaded.push {
-      buf with
-        id := nextId
-        table := { buf.table with undoLimit := settings.historyLimit }
-    }
-    nextId := nextId + 1
+  for i in [0:filesArr.size] do
+    let fname := filesArr[i]!
+    if i == safeActiveIdx then
+      let buf ← loadBufferByteArrayWithConfig fname settings
+      loaded := loaded.push {
+        buf with
+          id := i
+          loaded := true
+          table := { buf.table with undoLimit := settings.historyLimit }
+      }
+    else
+      loaded := loaded.push (placeholderFor i fname)
 
   let wsName := match workspacePath with
     | some path => (System.FilePath.fileName path).getD defaultWorkspaceName
@@ -76,9 +91,8 @@ def buildRestoredWorkspace (settings : EditorConfig) (workspacePath : Option Str
       nextWindowId := 1
     }
 
-  let activeIdx := if activeIdx < loaded.size then activeIdx else 0
-  let activeBuf := loaded[activeIdx]!
-  let (row, col) := List.getD cursors activeIdx (0, 0)
+  let activeBuf := loaded[safeActiveIdx]!
+  let (row, col) := List.getD cursors safeActiveIdx (0, 0)
   let cursor := clampCursorInBuffer settings.tabStop activeBuf ⟨row⟩ ⟨col⟩
   return {
     name := wsName

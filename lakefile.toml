@@ -1,6 +1,7 @@
 name = "vie"
 version = "0.1.0"
 defaultTargets = ["vie"]
+buildType = "release"
 testDriver = "test"
 
 [[lean_lib]]

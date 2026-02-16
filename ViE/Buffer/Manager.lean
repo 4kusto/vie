@@ -29,6 +29,33 @@ def removeBuffer (state : EditorState) (bufId : Nat) : EditorState :=
   state.updateCurrentWorkspace fun ws =>
     { ws with buffers := ws.buffers.filter (fun b => b.id != bufId) }
 
+def ensureBufferLoadedById (state : EditorState) (bufId : Nat) : IO EditorState := do
+  let ws := state.getCurrentWorkspace
+  match ws.buffers.find? (fun b => b.id == bufId) with
+  | none => pure state
+  | some buf =>
+      if buf.loaded || buf.filename.isNone then
+        pure state
+      else
+        let fname := buf.filename.getD ""
+        let loadedBuf ← ViE.loadBufferByteArrayWithConfig fname state.config
+        let merged := {
+          loadedBuf with
+            id := buf.id
+            dirty := buf.dirty
+            loaded := true
+            table := { loadedBuf.table with undoLimit := state.config.historyLimit }
+        }
+        let s' := state.updateCurrentWorkspace fun ws =>
+          { ws with buffers := ws.buffers.map (fun b => if b.id == buf.id then merged else b) }
+        pure { s' with message := s!"Loaded \"{fname}\"" }
+
+def ensureActiveBufferLoaded (state : EditorState) : IO EditorState := do
+  let ws := state.getCurrentWorkspace
+  match ws.layout.findView ws.activeWindowId with
+  | none => pure state
+  | some v => ensureBufferLoadedById state v.bufferId
+
 def findBufferByFilename (state : EditorState) (fname : String) : Option Nat :=
   let ws := state.getCurrentWorkspace
   ws.buffers.find? (fun b => b.filename == some fname) |>.map (fun b => b.id)
@@ -38,9 +65,10 @@ def openBuffer (state : EditorState) (filename : String) : IO EditorState := do
   let resolvedPath := state.getCurrentWorkspace.resolvePath filename
   match findBufferByFilename state resolvedPath with
   | some bid =>
-    -- Switch to existing buffer
+    -- Switch to existing buffer; load if it is a lazy placeholder.
     let s' := state.updateActiveView fun v => { v with bufferId := bid, cursor := {row:=0, col:=0}, scrollRow:=0, scrollCol:=0 }
-    return { s' with message := s!"Switched to \"{filename}\"" }
+    let s'' ← ensureBufferLoadedById s' bid
+    return { s'' with message := s!"Switched to \"{filename}\"" }
   | none =>
     try
       let loadedBuf ← ViE.loadBufferByteArrayWithConfig resolvedPath state.config
