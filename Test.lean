@@ -22,6 +22,7 @@ import Test.SearchHighlight
 import Test.TreeStats
 import Test.SyntaxHighlight
 import Test.InfoView
+import Test.Lsp
 
 def test : IO Unit := do
   IO.println "Running all tests..."
@@ -49,6 +50,7 @@ def test : IO Unit := do
   Test.TreeStats.test
   Test.SyntaxHighlight.test
   Test.InfoView.test
+  Test.Lsp.test
   IO.println "All tests finished."
 
 def main : IO Unit := do

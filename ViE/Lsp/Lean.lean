@@ -58,6 +58,8 @@ initialize uiStateRef : IO.Ref UiState ← do
     completion := none
     diagnostics := Lean.RBMap.empty
   }
+initialize initializeAckRef : IO.Ref (Option Nat) ← IO.mkRef none
+initialize readerFailureRef : IO.Ref (Option (UInt32 × String)) ← IO.mkRef none
 
 private def isLeanPath (path : String) : Bool :=
   path.endsWith ".lean"
@@ -67,8 +69,44 @@ def isLeanBuffer (buf : FileBuffer) : Bool :=
   | some f => isLeanPath f
   | none => false
 
-private def fileUri (path : String) : String :=
-  if path.startsWith "/" then s!"file://{path}" else s!"file:///{path}"
+private def hexDigit (n : Nat) : Char :=
+  if n < 10 then Char.ofNat (48 + n) else Char.ofNat (65 + (n - 10))
+
+private def pctEncodeByte (b : UInt8) : String :=
+  let n := b.toNat
+  let hi := n / 16
+  let lo := n % 16
+  String.singleton '%' ++ String.singleton (hexDigit hi) ++ String.singleton (hexDigit lo)
+
+private def isUriPathSafeByte (b : UInt8) : Bool :=
+  let n := b.toNat
+  (48 <= n && n <= 57) ||   -- 0-9
+  (65 <= n && n <= 90) ||   -- A-Z
+  (97 <= n && n <= 122) ||  -- a-z
+  n == 45 ||                -- -
+  n == 46 ||                -- .
+  n == 95 ||                -- _
+  n == 126 ||               -- ~
+  n == 47                   -- /
+
+private def encodeUriPath (path : String) : String :=
+  let bytes := path.toUTF8
+  Id.run do
+    let mut out := ""
+    for b in bytes do
+      if isUriPathSafeByte b then
+        out := out.push (Char.ofNat b.toNat)
+      else
+        out := out ++ pctEncodeByte b
+    return out
+
+def fileUri (path : String) : String :=
+  let absPath :=
+    if path.startsWith "/" then
+      path
+    else
+      "/" ++ path
+  s!"file://{encodeUriPath absPath}"
 
 private def mkRequest (id : Nat) (method : String) (params : Lean.Json) : Lean.Json :=
   Lean.Json.mkObj [
@@ -178,6 +216,13 @@ private def jsonNat? (j : Lean.Json) : Option Nat :=
         none
   | .str s => s.toNat?
   | _ => none
+
+def responseId? (j : Lean.Json) : Option Nat := do
+  let id ← (j.getObjVal? "id").toOption
+  jsonNat? id
+
+def isResponseForRequest (j : Lean.Json) (reqId : Nat) : Bool :=
+  responseId? j == some reqId
 
 private partial def hoverContentsText (j : Lean.Json) : String :=
   match j with
@@ -447,6 +492,7 @@ private def handleIncomingJson (j : Lean.Json) : IO Unit := do
       match (j.getObjVal? "id").toOption, (j.getObjVal? "result").toOption with
       | some idJson, some result =>
           let some reqId := jsonNat? idJson | return ()
+          initializeAckRef.set (some reqId)
           let st ← uiStateRef.get
           if st.pendingHover.find? reqId |>.isSome then
             handleHoverResponse reqId result
@@ -457,6 +503,7 @@ private def handleIncomingJson (j : Lean.Json) : IO Unit := do
       | some idJson, none =>
           if (j.getObjVal? "error").toOption.isSome then
             let some reqId := jsonNat? idJson | return ()
+            initializeAckRef.set (some reqId)
             let st ← uiStateRef.get
             uiStateRef.set {
               st with
@@ -467,16 +514,53 @@ private def handleIncomingJson (j : Lean.Json) : IO Unit := do
             pure ()
       | _, _ => pure ()
 
-private partial def readLoop (h : IO.FS.Handle) : IO Unit := do
+private partial def readLoop (pid : UInt32) (h : IO.FS.Handle) : IO Unit := do
   try
     let stream := IO.FS.Stream.ofHandle h
     let raw ← stream.readLspMessageAsString
     match Lean.Json.parse raw with
     | .ok j => handleIncomingJson j
     | .error _ => pure ()
-    readLoop h
-  catch _ =>
+    readLoop pid h
+  catch e =>
+    readerFailureRef.set (some (pid, toString e))
     pure ()
+
+private def clearFailedSessionIfAny : IO Unit := do
+  match (← sessionRef.get), (← readerFailureRef.get) with
+  | some s, some (pid, _) =>
+      if s.child.pid == pid then
+        readerFailureRef.set none
+        try
+          let _ ← terminateSession s
+          pure ()
+        catch _ =>
+          pure ()
+        sessionRef.set none
+        resetUiState
+      else
+        pure ()
+  | _, _ => pure ()
+
+private def waitForInitializeAck (child : LspChild) (reqId : Nat) (timeoutMs : Nat := 5000) : IO Bool := do
+  let tries := (timeoutMs / 10) + 1
+  let rec loop : Nat → IO Bool
+    | 0 => pure false
+    | n + 1 => do
+        match (← child.tryWait) with
+        | some _ => pure false
+        | none =>
+            match (← initializeAckRef.get) with
+            | some got =>
+                initializeAckRef.set none
+                if got == reqId then
+                  pure true
+                else
+                  loop n
+            | none =>
+                IO.sleep 10
+                loop n
+  loop tries
 
 private def startServer (root : Option String) : IO LspChild := do
   let cwd := root.map System.FilePath.mk
@@ -500,10 +584,15 @@ private def initializeServer (session : Session) : IO Session := do
     ("capabilities", Lean.Json.mkObj []),
     ("clientInfo", Lean.Json.mkObj [("name", .str "vie")])
   ]
-  let initializeReq := mkRequest session.nextId "initialize" initParams
+  let reqId := session.nextId
+  let initializeReq := mkRequest reqId "initialize" initParams
+  initializeAckRef.set none
   send session.child.stdin initializeReq
+  let acked ← waitForInitializeAck session.child reqId
+  if !acked then
+    throw (IO.userError "LSP initialize handshake timed out")
   send session.child.stdin (mkNotification "initialized" (Lean.Json.mkObj []))
-  pure { session with nextId := session.nextId + 1 }
+  pure { session with nextId := reqId + 1 }
 
 private def syncBuffer (session : Session) (buf : FileBuffer) : IO Session := do
   match buf.filename with
@@ -569,6 +658,7 @@ private def requestCompletion (session : Session) (uri : String) (line lspCol ro
   pure { session with nextId := reqId + 1 }
 
 private def startForState (state : EditorState) : IO EditorState := do
+  clearFailedSessionIfAny
   match (← sessionRef.get) with
   | some s =>
       match (← s.child.tryWait) with
@@ -580,8 +670,9 @@ private def startForState (state : EditorState) : IO EditorState := do
   | none =>
       try
         resetUiState
+        readerFailureRef.set none
         let child ← startServer state.getCurrentWorkspace.rootPath
-        let reader ← IO.asTask (readLoop child.stdout)
+        let reader ← IO.asTask (readLoop child.pid child.stdout)
         let session0 : Session := {
           child := child
           rootPath := state.getCurrentWorkspace.rootPath
@@ -594,6 +685,7 @@ private def startForState (state : EditorState) : IO EditorState := do
         sessionRef.set (some session2)
         return { state with message := s!"LSP started (pid={child.pid})" }
       catch e =>
+        clearFailedSessionIfAny
         return { state with message := s!"Failed to start LSP: {e}" }
 
 private def stopForState (state : EditorState) : IO EditorState := do
@@ -604,10 +696,12 @@ private def stopForState (state : EditorState) : IO EditorState := do
       try
         let stopped ← terminateSession s
         sessionRef.set none
+        readerFailureRef.set none
         resetUiState
         return { state with message := if stopped then "LSP stopped" else "LSP stop timeout; force-detached" }
       catch e =>
         sessionRef.set none
+        readerFailureRef.set none
         resetUiState
         return { state with message := s!"LSP stop error: {e}" }
 
@@ -618,17 +712,21 @@ def stopIfRunning : IO Unit := do
       match (← s.child.tryWait) with
       | some _ =>
           sessionRef.set none
+          readerFailureRef.set none
           resetUiState
       | none =>
           try
             let _ ← terminateSession s
             sessionRef.set none
+            readerFailureRef.set none
             resetUiState
           catch _ =>
             sessionRef.set none
+            readerFailureRef.set none
             resetUiState
 
 def syncActiveBufferIfRunning (state : EditorState) : IO Unit := do
+  clearFailedSessionIfAny
   match (← sessionRef.get) with
   | none => pure ()
   | some s =>
@@ -1035,6 +1133,7 @@ Apply Lean/LSP-specific post-update synchronization.
 This keeps editor core update flow independent from Lean-specific InfoView/LSP policies.
 -/
 def syncEditorUpdate (prevState nextState : EditorState) : IO EditorState := do
+  clearFailedSessionIfAny
   let prevBuf := prevState.getActiveBuffer
   let nextBuf := nextState.getActiveBuffer
   let sameActiveBuffer := prevBuf.id == nextBuf.id
