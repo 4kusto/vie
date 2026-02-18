@@ -38,11 +38,12 @@ private def buildLineIndex (pt : PieceTable) : Array Nat := Id.run do
 private def withLineIndexCache (pt : PieceTable) : PieceTable :=
   { pt with lineIndexCache := some (buildLineIndex pt) }
 
-/-- Construct from bytes -/
-def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) : PieceTable :=
+/-- Construct from bytes. `buildOnEdit` controls bloom rebuilding during subsequent edits. -/
+def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) (buildOnEdit : Bool := false) : PieceTable :=
   if bytes.size == 0 then
     {
       original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits,
+      bloomBuildOnEdit := buildOnEdit,
       undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none, lineIndexCache := some #[0]
     }
   else
@@ -83,18 +84,19 @@ def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) 
 
     let (pieces, starts) := splitChunks 0 #[] #[0]
     let tmpPt : PieceTable := {
-      original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits,
+      -- Build bloom bits during initial load if enabled, regardless of edit policy.
+      original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits, bloomBuildOnEdit := true,
       undoStack := [], redoStack := [], undoStackCount := 0, redoStackCount := 0, undoLimit := 100, lastInsert := none
     }
     let tree := PieceTree.fromPieces pieces tmpPt
     {
-      original := bytes, addBuffers := #[], tree := tree, bloomBuildLeafBits := buildLeafBits,
+      original := bytes, addBuffers := #[], tree := tree, bloomBuildLeafBits := buildLeafBits, bloomBuildOnEdit := buildOnEdit,
       undoStack := [], redoStack := [], undoLimit := 100, lastInsert := none, lineIndexCache := some starts
     }
 
-/-- Construct from initial string -/
-def PieceTable.fromString (s : String) (buildLeafBits : Bool := true) : PieceTable :=
-  PieceTable.fromByteArray s.toUTF8 buildLeafBits
+/-- Construct from initial string. -/
+def PieceTable.fromString (s : String) (buildLeafBits : Bool := true) (buildOnEdit : Bool := false) : PieceTable :=
+  PieceTable.fromByteArray s.toUTF8 buildLeafBits buildOnEdit
 
 /-- Convert tree to string -/
 def PieceTable.toString (pt : PieceTable) : String :=

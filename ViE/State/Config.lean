@@ -27,6 +27,7 @@ def defaultConfig : EditorConfig := {
   tabStop := 4
   searchBloomCacheMax := 1024
   searchBloomBuildLeafBits := true
+  searchBloomBuildOnEdit := false
 }
 
 def initialInputState : InputState := {
@@ -109,6 +110,7 @@ def initialState : EditorState := {
   explorers := []
   searchState := none
   floatingOverlay := none
+  infoViewRequested := false
   floatingInputCommand := none
   jumpBack := []
   jumpForward := []

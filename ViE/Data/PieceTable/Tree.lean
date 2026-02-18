@@ -204,20 +204,53 @@ def hash1 (b0 b1 b2 : UInt8) : Nat :=
 def hash2 (b0 b1 b2 : UInt8) : Nat :=
   (b0.toNat * 17161 + b1.toNat * 131 + b2.toNat) % ViE.BloomBits
 
+/-- Rolling update for 3-byte polynomial hash:
+    h' = ((h - out*base^2) * base + in) mod BloomBits. -/
+private def rollHash3 (h : Nat) (outB inB : UInt8) (base baseSq : Nat) : Nat :=
+  let m := ViE.BloomBits
+  let remove := (outB.toNat * baseSq) % m
+  let trimmed := if h >= remove then h - remove else h + m - remove
+  ((trimmed * base) + inB.toNat) % m
+
 /-- Add a trigram to the Bloom filter. -/
 def addTrigramToBloom (bloom : ByteArray) (b0 b1 b2 : UInt8) : ByteArray :=
   let h1 := hash1 b0 b1 b2
   let h2 := hash2 b0 b1 b2
   bloomSetBit (bloomSetBit bloom h1) h2
 
+private def setMaskBit (mask : ByteArray) (idx : Nat) : ByteArray :=
+  let byteIdx := idx / 8
+  let bitIdx := idx % 8
+  if byteIdx < mask.size then
+    let cur := mask[byteIdx]!
+    let bit : UInt8 := (1 : UInt8) <<< bitIdx.toUInt8
+    mask.set! byteIdx (cur ||| bit)
+  else
+    mask
+
+private def applyMaskToBloom (bloom : ByteArray) (mask : ByteArray) : ByteArray := Id.run do
+  let mut out := bloom
+  let size := min out.size mask.size
+  for i in [0:size] do
+    let m := mask[i]!
+    if m != 0 then
+      out := out.set! i (out[i]! ||| m)
+  return out
+
 def addTrigramsFromArray (bloom : ByteArray) (arr : Array UInt8) : ByteArray := Id.run do
-  if arr.size < 3 then
+  if arr.size < 3 || bloom.size == 0 then
     return bloom
   let limit := arr.size - 2
-  let mut out := bloom
+  let mut mask : ByteArray := ByteArray.mk (Array.replicate bloom.size (0 : UInt8))
   for i in [0:limit] do
-    out := addTrigramToBloom out arr[i]! arr[i + 1]! arr[i + 2]!
-  return out
+    let b0 := arr[i]!
+    let b1 := arr[i + 1]!
+    let b2 := arr[i + 2]!
+    let h1 := hash1 b0 b1 b2
+    let h2 := hash2 b0 b1 b2
+    mask := setMaskBit mask h1
+    mask := setMaskBit mask h2
+  return applyMaskToBloom bloom mask
 
 def takeFirstBytes (arr : Array UInt8) (n : Nat) : Array UInt8 :=
   if arr.size <= n then arr else arr.extract 0 n
@@ -254,18 +287,48 @@ def buildSuffixBytes (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : Array UI
     i := idx
   return acc
 
-def addBytesToBloom (bloom : ByteArray) (carry : Array UInt8) (bytes : ByteArray) : (ByteArray × Array UInt8) :=
-  let arr := carry ++ bytes.data
-  let bloom' := addTrigramsFromArray bloom arr
-  let carry' := takeLastBytes arr 2
-  (bloom', carry')
+def addBytesToBloom (bloom : ByteArray) (carry : Array UInt8) (bytes : ByteArray) : (ByteArray × Array UInt8) := Id.run do
+  let total := carry.size + bytes.size
+  let carry' :=
+    if total <= 2 then
+      takeLastBytes (carry ++ bytes.data) 2
+    else
+      let start := total - 2
+      let b0 :=
+        if start < carry.size then
+          carry[start]!
+        else
+          bytes[start - carry.size]!
+      let b1 :=
+        if start + 1 < carry.size then
+          carry[start + 1]!
+        else
+          bytes[start + 1 - carry.size]!
+      #[b0, b1]
+  if total < 3 || bloom.size == 0 then
+    return (bloom, carry')
+  let limit := total - 2
+  let getAt (i : Nat) : UInt8 :=
+    if i < carry.size then carry[i]! else bytes[i - carry.size]!
+  let mut h1 := hash1 (getAt 0) (getAt 1) (getAt 2)
+  let mut h2 := hash2 (getAt 0) (getAt 1) (getAt 2)
+  let mut mask : ByteArray := ByteArray.mk (Array.replicate bloom.size (0 : UInt8))
+  for i in [0:limit] do
+    mask := setMaskBit mask h1
+    mask := setMaskBit mask h2
+    if i + 3 < total then
+      let outB := getAt i
+      let inB := getAt (i + 3)
+      h1 := rollHash3 h1 outB inB 31 961
+      h2 := rollHash3 h2 outB inB 131 17161
+  return (applyMaskToBloom bloom mask, carry')
 
 def addBoundaryTrigrams (bloom : ByteArray) (leftSuffix rightPrefix : Array UInt8) : ByteArray :=
   let combined := leftSuffix ++ rightPrefix
   addTrigramsFromArray bloom combined
 
 def buildBloomForPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.SearchBloom := Id.run do
-  if !pt.bloomBuildLeafBits then
+  if !pt.bloomBuildLeafBits || !pt.bloomBuildOnEdit then
     let prefixBytes := buildPrefixBytes pieces pt
     let suffixBytes := buildSuffixBytes pieces pt
     return { bits := ViE.SearchBloom.empty.bits, prefixBytes := prefixBytes, suffixBytes := suffixBytes, hasBits := false }
@@ -364,6 +427,13 @@ def mkLeaf (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree :=
   else
     let s := pieces.foldl (fun acc p => acc + (ViE.Stats.ofPiece p)) ViE.Stats.empty
     let searchMeta := buildBloomForPieces pieces pt
+    ViE.PieceTree.leaf pieces s searchMeta
+
+private def mkLeafWithSearchMeta (pieces : Array ViE.Piece) (searchMeta : ViE.SearchBloom) : ViE.PieceTree :=
+  if pieces.size == 0 then
+    ViE.PieceTree.empty
+  else
+    let s := pieces.foldl (fun acc p => acc + (ViE.Stats.ofPiece p)) ViE.Stats.empty
     ViE.PieceTree.leaf pieces s searchMeta
 
 /-- Create an internal node -/
@@ -500,11 +570,12 @@ private def concatCore (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTa
   match l, r with
   | ViE.PieceTree.empty, _ => r
   | _, ViE.PieceTree.empty => l
-  | ViE.PieceTree.leaf ps1 _ _, ViE.PieceTree.leaf ps2 _ _ =>
+  | ViE.PieceTree.leaf ps1 _ sm1, ViE.PieceTree.leaf ps2 _ sm2 =>
       -- Fast path for adjacent leaves; preserve piece merging behavior.
       if ps1.size > 0 && ps2.size > 0 then
         let p1 := ps1.back!
         let p2 := ps2[0]!
+        let mergedMeta := combineBloom sm1 sm2
         if p1.source == p2.source && p1.start + p1.length == p2.start then
           let mergedPiece : ViE.Piece := { p1 with
             length := p1.length + p2.length,
@@ -513,14 +584,16 @@ private def concatCore (l : ViE.PieceTree) (r : ViE.PieceTree) (pt : ViE.PieceTa
           }
           let ps := (ps1.pop).push mergedPiece ++ (ps2.extract 1 ps2.size)
           if ps.size <= ViE.NodeCapacity then
-            mkLeaf ps pt
+            mkLeafWithSearchMeta ps mergedMeta
           else
             let mid := ps.size / 2
             mkInternal #[mkLeaf (ps.extract 0 mid) pt, mkLeaf (ps.extract mid ps.size) pt]
         else
           let ps := ps1 ++ ps2
-          if ps.size <= ViE.NodeCapacity then mkLeaf ps pt
-          else mkInternal #[mkLeaf ps1 pt, mkLeaf ps2 pt]
+          if ps.size <= ViE.NodeCapacity then
+            mkLeafWithSearchMeta ps mergedMeta
+          else
+            mkInternal #[l, r]
       else if ps1.size > 0 then
         l
       else

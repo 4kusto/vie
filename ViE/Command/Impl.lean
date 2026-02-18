@@ -7,6 +7,7 @@ import ViE.Loader
 import ViE.Checkpoint
 import ViE.Command.Parser
 import ViE.Workspace
+import ViE.Lsp.Lean
 
 namespace ViE.Command
 
@@ -19,28 +20,41 @@ def cmdEdit (args : List String) (state : EditorState) : IO EditorState := do
   | [fname] =>
     -- Resolve path relative to workspace
     let resolvedPath := state.getCurrentWorkspace.resolvePath fname
-    ViE.Buffer.openBuffer state resolvedPath
+    let s ← ViE.Buffer.openBuffer state resolvedPath
+    ViE.Lsp.Lean.syncActiveBufferIfRunning s
+    return s
   | [] => return { state with message := "No file name" }
   | _ => return { state with message := "Too many arguments" }
 
 def cmdWrite (args : List String) (state : EditorState) : IO EditorState :=
   match ViE.Command.parseFilenameArg args state.getActiveBuffer.filename with
   | .ok fname =>
-    ViE.saveBuffer state fname
+    do
+      let s ← ViE.saveBuffer state fname
+      ViE.Lsp.Lean.syncActiveBufferIfRunning s
+      return s
   | .error msg =>
     return { state with message := msg }
 
-def cmdQuit (_ : List String) (state : EditorState) : IO EditorState :=
-  return (ViE.Window.closeActiveWindow state)
+def cmdQuit (_ : List String) (state : EditorState) : IO EditorState := do
+  let s := ViE.Window.closeActiveWindow state
+  if s.shouldQuit then
+    ViE.Lsp.Lean.stopIfRunning
+  return s
 
 def cmdQuitForce (_ : List String) (state : EditorState) : IO EditorState :=
-  return { state with shouldQuit := true }
+  do
+    ViE.Lsp.Lean.stopIfRunning
+    return { state with shouldQuit := true }
 
 def cmdWriteQuit (args : List String) (state : EditorState) : IO EditorState := do
   match ViE.Command.parseFilenameArg args state.getActiveBuffer.filename with
   | .ok fname =>
     let state' ← ViE.saveBuffer state fname
-    return (ViE.Window.closeActiveWindow state')
+    let s := ViE.Window.closeActiveWindow state'
+    if s.shouldQuit then
+      ViE.Lsp.Lean.stopIfRunning
+    return s
   | .error msg =>
     return { state with message := msg }
 
@@ -624,6 +638,7 @@ def defaultCommandMap : CommandMap := [
   ("wfloat", cmdFloatWin),
   ("reload", cmdReload),
   ("refresh", cmdReload),
+  ("lsp", ViE.Lsp.Lean.cmdLsp),
   ("bloom", cmdBloom),
   ("nohl", cmdNoHighlight),
   ("noh", cmdNoHighlight)

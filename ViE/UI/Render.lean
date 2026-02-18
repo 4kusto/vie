@@ -98,7 +98,8 @@ def render (state : EditorState) : IO EditorState := do
   buffer := buffer.push statusRight
   buffer := buffer.push Terminal.clearLineStr
 
-  let overlayToRender := stateAfterLayout.floatingOverlay.orElse (fun _ => messageOverlayForState stateAfterLayout)
+  let overlayToRender :=
+    stateAfterLayout.floatingOverlay.orElse (fun _ => messageOverlayForState stateAfterLayout)
   if let some overlay := overlayToRender then
     buffer := buffer ++ renderFloatingOverlay rows cols stateAfterLayout.config.tabStop overlay
 

@@ -2,6 +2,7 @@ import ViE.State
 import ViE.Key.Handler
 import ViE.Key.Input
 import ViE.Buffer.Manager
+import ViE.Lsp.Lean
 
 namespace ViE
 
@@ -61,6 +62,7 @@ def update (config : Config) (state : EditorState) (k : Key) : IO EditorState :=
   | .visualBlock => config.bindings.visualBlock state k
 
   let loadedState ← ViE.Buffer.ensureActiveBufferLoaded newState
-  return enforceScroll loadedState
+  let infoSynced ← ViE.Lsp.Lean.syncEditorUpdate state loadedState
+  return enforceScroll infoSynced
 
 end ViE

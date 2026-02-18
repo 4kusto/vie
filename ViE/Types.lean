@@ -126,6 +126,7 @@ structure EditorConfig where
   tabStop : Nat := 4
   searchBloomCacheMax : Nat
   searchBloomBuildLeafBits : Bool
+  searchBloomBuildOnEdit : Bool := false
   historyLimit : Nat := 100
   deriving Inhabited
 
@@ -338,6 +339,7 @@ structure EditorState where
   explorers : List (Nat × ExplorerState) -- BufferId × Explorer state
   searchState : Option SearchState
   floatingOverlay : Option FloatingOverlay
+  infoViewRequested : Bool := false
   floatingInputCommand : Option String := none
   jumpBack : List Point := []
   jumpForward : List Point := []
@@ -364,10 +366,17 @@ abbrev CommandAction := List String → EditorState → IO EditorState
 abbrev CommandMap := List (String × CommandAction)
 
 /-- The complete user configuration. -/
+structure LanguageRuntimeConfig where
+  autoStartLsp : Bool := false
+  autoOpenInfoView : Bool := false
+  deriving Inhabited
+
 structure Config where
   settings : EditorConfig
   bindings : KeyMap
   commands : CommandMap
+  languageConfigs : Lean.RBMap String LanguageRuntimeConfig compare :=
+    (Lean.RBMap.empty.insert "lean" { autoStartLsp := true, autoOpenInfoView := true })
 
 inductive Direction where
   | left

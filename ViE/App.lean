@@ -8,6 +8,7 @@ import ViE.IO
 import ViE.Config
 import ViE.Checkpoint
 import ViE.Loader
+import ViE.Lsp.Lean
 
 namespace ViE
 
@@ -234,6 +235,7 @@ def start (config : Config) (args : List String) : IO Unit := do
             buffers := [initialBuffer],
             nextBufferId := 1
         }
+  let state ← ViE.Lsp.Lean.applyStartupLanguageDefaults config state
 
   ViE.Terminal.enableRawMode
   try

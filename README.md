@@ -139,6 +139,19 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 - `:g/pat/ s/old/new/[g]`: Substitute on matching lines
 - `:v/pat/ d`: Delete non-matching lines
 
+## Language Modes (WIP)
+- Markdown
+  - Basic syntax highlighting (WIP)
+- Lean
+  - Basic syntax highlighting (WIP)
+  - Built-in LSP integration (WIP)
+    - `:lsp` command
+    - `:lsp infoview` command
+  - By default, Lean mode auto-starts LSP and opens InfoView
+    - This behavior can be customized via per-language config
+- Others
+  - To be implemented
+
 ### Shortcuts
 - `Alt + Shift + h/j/k/l`: resize focused select window
 - `Alt + h/j/k/l`: change focus select window

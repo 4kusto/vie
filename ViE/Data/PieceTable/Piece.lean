@@ -107,6 +107,7 @@ structure PieceTable where
   tree : PieceTree
   lineIndexCache : Option (Array Nat) := none
   bloomBuildLeafBits : Bool := true
+  bloomBuildOnEdit : Bool := false
   undoStack : List (PieceTree × Nat) := []
   redoStack : List (PieceTree × Nat) := []
   undoStackCount : Nat := 0
