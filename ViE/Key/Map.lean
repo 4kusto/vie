@@ -5,6 +5,7 @@ import ViE.Window.Actions
 import ViE.Command.Explorer
 import ViE.Command.Dispatch
 import ViE.Basic
+import ViE.Language.Key
 
 namespace ViE.Key
 
@@ -614,12 +615,17 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
         | Key.down => pure (overlayMoveDown s)
         | _ => pure s
     else
-      match k with
-      | Key.esc => pure $ (s.commitEdit.moveCursorLeft).setMode Mode.normal
-      | Key.backspace => pure $ s.deleteBeforeCursor
-      | Key.char c => pure $ s.insertChar c
-      | Key.enter => pure s.insertNewline
-      | _ => pure s,
+      do
+        let handled ← ViE.Language.Key.handleInsertKey? s k
+        match handled with
+        | some s' => pure s'
+        | none =>
+            match k with
+            | Key.esc => pure $ (s.commitEdit.moveCursorLeft).setMode Mode.normal
+            | Key.backspace => pure $ s.deleteBeforeCursor
+            | Key.char c => pure $ s.insertChar c
+            | Key.enter => pure { s.insertNewline with completionPopup := none }
+            | _ => pure s,
 
   command := handleCommandInput commands,
 

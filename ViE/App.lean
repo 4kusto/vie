@@ -241,6 +241,7 @@ def start (config : Config) (args : List String) : IO Unit := do
   try
     loop config state
   finally
+    ViE.Lsp.Lean.stopIfRunning
     ViE.Terminal.disableRawMode
     ViE.Terminal.clearScreen
     IO.println "Bye!"

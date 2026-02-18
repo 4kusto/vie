@@ -51,10 +51,6 @@ def getOffsetFromPointInBuffer (buffer : FileBuffer) (row : Row) (col : Col) : O
 def getLineLengthFromBuffer (buffer : FileBuffer) (n : Row) : Option Nat :=
   getLineLengthFromBufferWithTabStop buffer n defaultConfig.tabStop
 
-/-- Convert byte offset to Row/Col (display column) using default tab stop. -/
-def getPointFromOffsetInBuffer (buffer : FileBuffer) (offset : Nat) : Point :=
-  getPointFromOffsetInBufferWithTabStop buffer offset defaultConfig.tabStop
-
 namespace Buffer
 
 /-- Convert FileBuffer to TextBuffer (compatibility function) -/
@@ -96,30 +92,6 @@ def fileBufferFromTextBufferWithConfig (id : Nat) (filename : Option String) (co
     cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
   }
 
-/-- Update FileBuffer from TextBuffer (compatibility function) -/
-def fileBufferUpdateFromTextBuffer (buf : FileBuffer) (newContent : TextBuffer) : FileBuffer :=
-  let newBuf := fileBufferFromTextBuffer buf.id buf.filename newContent
-  { newBuf with dirty := true }
-
 end Buffer
-
-/-- Modify a line in FileBuffer using PieceTable operations -/
-def modifyLineInBuffer (buffer : FileBuffer) (row : Row) (f : String → String) : FileBuffer :=
-  match buffer.table.getLineRange row.val with
-  | some (startOffset, length) =>
-     match getLineFromBuffer buffer row with
-     | some oldLine =>
-        let newLine := f oldLine
-        -- Edit: Delete old line content, insert new content.
-        -- We preserve the newline character if it exists (getLineRange excludes it).
-        let table' := buffer.table.delete startOffset length startOffset
-        let table'' := table'.insert startOffset newLine startOffset
-        { buffer with
-          table := table''
-          dirty := true
-        }
-     | none => buffer -- Should check range first, but safe fallback
-  | none => buffer -- Line not found
-
 
 end ViE

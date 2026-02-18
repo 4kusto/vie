@@ -833,6 +833,31 @@ def testExplorerOpenUsesFocusedWindow : IO Unit := do
           let rightBufName := ws7.buffers.find? (fun b => b.id == rightView.bufferId) |>.bind (fun b => b.filename)
           assertEqual "Non-focused split keeps prior buffer" (some rightPath) rightBufName
 
+def testLeanCompletionPopupBehavior : IO Unit := do
+  IO.println "  Testing Lean Completion Popup..."
+  let popup : CompletionPopup := {
+    items := #[
+      { label := "foo", insertText := "foo" },
+      { label := "foobar", insertText := "foobar" }
+    ]
+    selected := 0
+    anchorRow := 0
+    anchorCol := 2
+  }
+  let s0 : EditorState :=
+    ({ ViE.initialState with mode := .insert, completionPopup := some popup }).updateActiveBuffer fun b =>
+      { b with filename := some "Main.lean", table := ViE.PieceTable.fromString "ab" }
+  let s0 := s0.setCursor { row := ⟨0⟩, col := ⟨2⟩ }
+
+  let s1 ← runKeys s0 [Key.char 'c']
+  assertBuffer "completion popup keeps showing on char insert" s1 "abc"
+  assertEqual "completion popup remains visible after char insert" true s1.completionPopup.isSome
+
+  let s2 ← runKeys s1 [Key.enter]
+  assertBuffer "Enter inserts newline instead of accepting completion" s2 "abc\n"
+  assertCursor "Enter moves cursor to next line head with completion popup" s2 1 0
+  assertEqual "Enter closes completion popup" true s2.completionPopup.isNone
+
 def test : IO Unit := do
   IO.println "Starting Expanded Keybind Tests..."
   testMotions
@@ -851,6 +876,7 @@ def test : IO Unit := do
   testBufferExplorerCommand
   testExplorerCommandAliases
   testExplorerOpenUsesFocusedWindow
+  testLeanCompletionPopupBehavior
   IO.println "All Expanded Keybind Tests passed!"
 
 end Test.Keybinds

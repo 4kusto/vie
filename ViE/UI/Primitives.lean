@@ -9,17 +9,6 @@ def leftPad (s : String) (width : Nat) : String :=
   if s.length >= width then s
   else "".pushn ' ' (width - s.length) ++ s
 
-/-- Take characters from substring until visual width limit is reached. -/
-def takeVisual (s : Substring.Raw) (width : Nat) : String :=
-  Unicode.takeByDisplayWidth s width
-
-def rightPadVisual (s : String) (width : Nat) : String :=
-  let w := Unicode.stringWidth s
-  if w >= width then
-    s
-  else
-    s ++ "".pushn ' ' (width - w)
-
 structure Rect where
   row : Nat
   col : Nat

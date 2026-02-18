@@ -72,12 +72,6 @@ def makeWorkspaceState (name : String) (rootPath : Option String) (nextBufId : N
   nextWindowId := 1
 }
 
-def initialWorkgroupState : WorkgroupState := {
-  name := "1"
-  workspaces := #[makeWorkspaceState defaultWorkspaceName none 0]
-  currentWorkspace := 0
-}
-
 def createEmptyWorkgroup (name : String) (nextBufId : Nat) : WorkgroupState := {
   name := name
   workspaces := #[makeWorkspaceState defaultWorkspaceName none nextBufId]
@@ -110,6 +104,7 @@ def initialState : EditorState := {
   explorers := []
   searchState := none
   floatingOverlay := none
+  completionPopup := none
   infoViewRequested := false
   floatingInputCommand := none
   jumpBack := []

@@ -32,23 +32,10 @@ def getWindowSize : IO (Nat × Nat) := do
     return (r, c)
   | _ => return (24, 80) -- Fallback
 
-/-- Move cursor to specific row and column (0-indexed). -/
-def moveCursor (row col : Nat) : IO Unit := do
-  -- ANSI escape codes are 1-indexed.
-  IO.print s!"\x1b[{row + 1};{col + 1}H"
-
 def moveCursorStr (row col : Nat) : String :=
   s!"\x1b[{row + 1};{col + 1}H"
 
-/-- Hide cursor. -/
-def hideCursor : IO Unit := do
-  IO.print "\x1b[?25l"
-
 def hideCursorStr : String := "\x1b[?25l"
-
-/-- Show cursor. -/
-def showCursor : IO Unit := do
-  IO.print "\x1b[?25h"
 
 def showCursorStr : String := "\x1b[?25h"
 

@@ -63,21 +63,6 @@ def loadBufferByteArrayWithConfig (filename : String) (config : EditorConfig) : 
   catch _ =>
     return emptyBuffer (some filename) buildLeafBits buildOnEdit
 
-def loadPreviewBufferByteArray (filename : String) (maxBytes : Nat) : IO FileBuffer := do
-  try
-    let path := System.FilePath.mk filename
-    if ← path.pathExists then
-      if ← path.isDir then
-        return emptyBuffer (some filename) true false
-      else
-        let data ← IO.FS.withFile filename IO.FS.Mode.read fun handle =>
-          handle.read (USize.ofNat maxBytes)
-        return bufferFromData filename data true false
-    else
-      return emptyBuffer (some filename) true false
-  catch _ =>
-    return emptyBuffer (some filename) true false
-
 def loadPreviewBufferByteArrayWithConfig (filename : String) (maxBytes : Nat) (config : EditorConfig) : IO FileBuffer := do
   let buildLeafBits := config.searchBloomBuildLeafBits
   let buildOnEdit := config.searchBloomBuildOnEdit

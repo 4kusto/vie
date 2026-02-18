@@ -12,10 +12,6 @@ import ViE.Buffer
 
 namespace ViE
 
-/-- Insert a character at the cursor position. -/
-def insertAtCursor (state : EditorState) (c : Char) : EditorState :=
-  state.insertChar c
-
 /-- Parse filename argument from command args.
     Returns the filename from args, or the current buffer's filename if no args provided.
     Returns error message if multiple args or no filename available. -/

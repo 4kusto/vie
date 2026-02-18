@@ -75,10 +75,6 @@ def getDisplayString (c : Char) : String :=
 def stringWidth (s : String) : Nat :=
   s.foldl (fun acc c => acc + charWidth c) 0
 
-/-- Calculate the total visual width of a substring. -/
-def substringWidth (s : Substring.Raw) : Nat :=
-  s.foldl (fun acc c => acc + charWidth c) 0
-
 /-- Get the byte length of a UTF-8 sequence starting with `b`.
     Returns 0 if `b` is a continuation byte or invalid start. -/
 def utf8ByteLength (b : UInt8) : Nat :=
@@ -87,29 +83,6 @@ def utf8ByteLength (b : UInt8) : Nat :=
   else if (b &&& 0xF0) == 0xE0 then 3
   else if (b &&& 0xF8) == 0xF0 then 4
   else 0 -- Invalid or continuation
-
-/-- Count newlines in a byte array slice. -/
-def countNewlines (data : ByteArray) (start : Nat) (len : Nat) : Nat :=
-  let endPos := start + len
-  let rec loop (i : Nat) (count : Nat) : Nat :=
-    if i >= endPos then count
-    else
-      if data[i]! == 10 then loop (i + 1) (count + 1) -- 10 is \n
-      else loop (i + 1) count
-  loop start 0
-
-/-- Count UTF-8 characters in a byte array range. -/
-def countChars (bytes : ByteArray) (start len : Nat) : Nat :=
-  let stop := start + len
-  let rec loop (i : Nat) (cnt : Nat) : Nat :=
-    if i >= stop then cnt
-    else
-      let b := bytes[i]!
-      if (b &&& 0xC0) != 0x80 then
-        loop (i + 1) (cnt + 1)
-      else
-        loop (i + 1) cnt
-  loop start 0
 
 /-- Count newlines and UTF-8 characters in a byte array range in one pass. -/
 def countNewlinesAndChars (bytes : ByteArray) (start len : Nat) : Nat × Nat :=
@@ -165,20 +138,6 @@ def displayColToByteOffset (s : String) (col : Nat) : Nat :=
         loop rest (byteAcc + b) (widthAcc + w)
   loop s.toList 0 0
 
-/-- Build an index mapping display columns to UTF-8 byte offsets at character boundaries.
-    The result includes the starting boundary (0,0) and the final boundary (totalWidth,totalBytes). -/
-def buildDisplayByteIndex (s : String) : Array (Nat × Nat) :=
-  let rec loop (cs : List Char) (disp bytes : Nat) (acc : Array (Nat × Nat)) : Array (Nat × Nat) :=
-    match cs with
-    | [] => acc
-    | c :: rest =>
-      let w := charWidth c
-      let b := c.toString.toUTF8.size
-      let disp' := disp + w
-      let bytes' := bytes + b
-      loop rest disp' bytes' (acc.push (disp', bytes'))
-  loop s.toList 0 0 #[(0, 0)]
-
 /-- Convert a display column to a UTF-8 byte offset using a precomputed index. -/
 def displayColToByteOffsetFromIndex (idx : Array (Nat × Nat)) (col : Nat) : Nat :=
   if idx.isEmpty then
@@ -196,51 +155,6 @@ def displayColToByteOffsetFromIndex (idx : Array (Nat × Nat)) (col : Nat) : Nat
         best
       termination_by hi - lo
     loop 0 idx.size 0
-
-/-- Compute the next display column (advancing by one character). -/
-def nextDisplayCol (s : String) (col : Nat) : Nat :=
-  let idx := displayColToCharIndex s col
-  let startWidth := displayWidthAtCharIndex s idx
-  if col < startWidth then
-    startWidth
-  else
-    let chars := s.toList
-    if idx < chars.length then
-      let w := charWidth (chars[idx]!)
-      startWidth + w
-    else
-      col
-
-/-- Compute the previous display column (moving back by one character). -/
-def prevDisplayCol (s : String) (col : Nat) : Nat :=
-  if col == 0 then
-    0
-  else
-    let idx := displayColToCharIndex s col
-    let startWidth := displayWidthAtCharIndex s idx
-    if col > startWidth then
-      startWidth
-    else if idx == 0 then
-      0
-    else
-      displayWidthAtCharIndex s (idx - 1)
-
-/-- Drop `width` display columns from the start of a substring. -/
-def dropByDisplayWidth (s : Substring.Raw) (width : Nat) : Substring.Raw :=
-  let rec loop (i : String.Pos.Raw) (acc : Nat) : Substring.Raw :=
-    if h : i.byteIdx < s.bsize then
-      let c := s.get i
-      let w := charWidth c
-      if acc + w > width then
-        s.extract i ⟨s.bsize⟩
-      else
-        let i' := s.next i
-        have := Nat.sub_lt_sub_left h (Substring.Raw.lt_next s i h)
-        loop i' (acc + w)
-    else
-      s.extract i ⟨s.bsize⟩
-    termination_by s.bsize - i.1
-  loop 0 0
 
 /-- Take characters from substring until visual width limit is reached. -/
 def takeByDisplayWidth (s : Substring.Raw) (width : Nat) : String :=
@@ -293,20 +207,6 @@ def stringWidthWithTabStop (s : String) (tabStop : Nat) : Nat :=
       let w := charWidthAt tabStop acc c
       loop rest (acc + w)
   loop s.toList 0
-
-/-- Calculate the total visual width of a substring with tab-stop awareness. -/
-def substringWidthWithTabStop (s : Substring.Raw) (tabStop : Nat) : Nat :=
-  let rec loop (i : String.Pos.Raw) (acc : Nat) : Nat :=
-    if h : i.byteIdx < s.bsize then
-      let c := s.get i
-      let i' := s.next i
-      have := Nat.sub_lt_sub_left h (Substring.Raw.lt_next s i h)
-      let w := charWidthAt tabStop acc c
-      loop i' (acc + w)
-    else
-      acc
-    termination_by s.bsize - i.1
-  loop 0 0
 
 /-- Convert a display column to a character index (0-based), tab-stop aware. -/
 def displayColToCharIndexWithTabStop (s : String) (tabStop : Nat) (col : Nat) : Nat :=

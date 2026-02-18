@@ -148,25 +148,6 @@ def findChildForOffset (imeta : ViE.InternalMeta) (offset : UInt64) : Nat :=
 
     return left
 
-/-- Binary search to find child index containing the given line number -/
-def findChildForLine (imeta : ViE.InternalMeta) (lineIdx : UInt64) : Nat :=
-  Id.run do
-    let arr := imeta.cumulativeLines
-    if arr.isEmpty then return 0
-    if arr.size == 1 then return 0
-
-    let mut left := 0
-    let mut right := arr.size - 2  -- Last valid child index
-
-    while left < right do
-      let mid := (left + right + 1) / 2
-      if arr[mid]! <= lineIdx then
-        left := mid
-      else
-        right := mid - 1
-
-    return left
-
 def bloomOr (a b : ByteArray) : ByteArray := Id.run do
   let mut out := a
   let size := min a.size b.size
@@ -211,12 +192,6 @@ private def rollHash3 (h : Nat) (outB inB : UInt8) (base baseSq : Nat) : Nat :=
   let remove := (outB.toNat * baseSq) % m
   let trimmed := if h >= remove then h - remove else h + m - remove
   ((trimmed * base) + inB.toNat) % m
-
-/-- Add a trigram to the Bloom filter. -/
-def addTrigramToBloom (bloom : ByteArray) (b0 b1 b2 : UInt8) : ByteArray :=
-  let h1 := hash1 b0 b1 b2
-  let h2 := hash2 b0 b1 b2
-  bloomSetBit (bloomSetBit bloom h1) h2
 
 private def setMaskBit (mask : ByteArray) (idx : Nat) : ByteArray :=
   let byteIdx := idx / 8
@@ -349,9 +324,6 @@ def buildBloomForPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.S
       carry := carry'
     return { bits := bits, prefixBytes := prefixBytes, suffixBytes := carry, hasBits := true }
 
-def bloomIsEmpty (bloom : ByteArray) : Bool :=
-  bloom.data.all (fun b => b == 0)
-
 def combineBloom (left right : ViE.SearchBloom) : ViE.SearchBloom :=
   let pref :=
     if left.prefixBytes.size >= 2 then left.prefixBytes
@@ -410,16 +382,6 @@ def cacheInsert (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (
   else
     (cache, order)
 
-def leafBloomBitsWithCache (pieces : Array ViE.Piece) (pt : ViE.PieceTable) (leafOffset : Nat)
-  (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (maxSize : Nat)
-  : (ByteArray × Lean.RBMap Nat ByteArray compare × Array Nat) :=
-  match cache.find? leafOffset with
-  | some bits => (bits, cache, order)
-  | none =>
-      let bits := (buildBloomForPieces pieces pt).bits
-      let (cache', order') := cacheInsert cache order maxSize leafOffset bits
-      (bits, cache', order')
-
 /-- Create a leaf node -/
 def mkLeaf (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree :=
   if pieces.size == 0 then
@@ -470,27 +432,6 @@ def fromPieces (pieces : Array ViE.Piece) (pt : ViE.PieceTable) : ViE.PieceTree 
           k := j
         level := parents
       return level[0]!
-
-/-- Flatten a tree into pieces in document order (iterative to avoid deep recursion). -/
-def toPieces (t : ViE.PieceTree) : Array ViE.Piece := Id.run do
-  let mut out : Array ViE.Piece := #[]
-  let mut stack : List ViE.PieceTree := [t]
-  while !stack.isEmpty do
-    match stack with
-    | [] => pure ()
-    | node :: rest =>
-        stack := rest
-        match node with
-        | ViE.PieceTree.empty => pure ()
-        | ViE.PieceTree.leaf pieces _ _ =>
-            out := out ++ pieces
-        | ViE.PieceTree.internal children _ _ _ =>
-            let mut i := children.size
-            while i > 0 do
-              let j := i - 1
-              stack := children[j]! :: stack
-              i := j
-  return out
 
 /-- Insert `node` into the right spine of `tree` at the level matching `targetHeight`.
     Returns the merged tree, handling overflow splits. -/

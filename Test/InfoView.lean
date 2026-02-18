@@ -60,6 +60,12 @@ def test : IO Unit := do
   assertEqual "InfoView off closes split window" 1 (ViE.Window.getWindowIds wsOff.layout |>.length)
   assertEqual "InfoView off removes buffer" true ((wsOff.buffers.find? (fun b => b.filename == some ViE.Lsp.Lean.infoViewVirtualPath)).isNone)
 
+  let sInfoOnly := ViE.Window.closeActiveWindow sLean'
+  let sInfoOnly' ← ViE.Lsp.Lean.syncInfoViewWindow sInfoOnly
+  let wsInfoOnly := sInfoOnly'.getCurrentWorkspace
+  assertEqual "InfoView-only fallback requests quit" true sInfoOnly'.shouldQuit
+  assertEqual "InfoView-only fallback removes InfoView buffer" true ((wsInfoOnly.buffers.find? (fun b => b.filename == some ViE.Lsp.Lean.infoViewVirtualPath)).isNone)
+
   IO.println "InfoView Test passed!"
 
 end Test.InfoView

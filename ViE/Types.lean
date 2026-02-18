@@ -283,6 +283,18 @@ structure FloatingOverlay where
   cursorCol : Nat := 0
   deriving Repr, Inhabited
 
+structure CompletionItem where
+  label : String
+  insertText : String
+  deriving Repr, Inhabited
+
+structure CompletionPopup where
+  items : Array CompletionItem
+  selected : Nat := 0
+  anchorRow : Nat
+  anchorCol : Nat
+  deriving Repr, Inhabited
+
 inductive Layout where
   | window (id : Nat) (view : ViewState)
   | hsplit (left right : Layout) (ratio : Float)
@@ -339,6 +351,7 @@ structure EditorState where
   explorers : List (Nat × ExplorerState) -- BufferId × Explorer state
   searchState : Option SearchState
   floatingOverlay : Option FloatingOverlay
+  completionPopup : Option CompletionPopup := none
   infoViewRequested : Bool := false
   floatingInputCommand : Option String := none
   jumpBack : List Point := []

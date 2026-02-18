@@ -146,6 +146,9 @@ def render (state : EditorState) : IO EditorState := do
             let visCol := min colIdx layout.innerWidth
             some (layout.top + 1 + layout.titleRows + visRow, layout.left + 2 + visCol)
 
+  let activeCursorPos := getCursorPos (baseLayout.getD wsAfterLayout.layout) 0 0 layoutH cols
+  buffer := buffer ++ renderCompletionPopup rows cols stateAfterLayout activeCursorPos
+
   if stateAfterLayout.floatingOverlay.isSome && stateAfterLayout.mode != .command &&
      stateAfterLayout.mode != .searchForward && stateAfterLayout.mode != .searchBackward then
     buffer := buffer.push (
@@ -162,7 +165,7 @@ def render (state : EditorState) : IO EditorState := do
     )
   else
     buffer := buffer.push (
-      match getCursorPos (baseLayout.getD wsAfterLayout.layout) 0 0 layoutH cols with
+      match activeCursorPos with
       | some (pr, pc) => Terminal.moveCursorStr pr pc
       | none => ""
     )

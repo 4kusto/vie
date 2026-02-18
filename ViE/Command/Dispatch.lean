@@ -70,25 +70,6 @@ def collectMatchesInPieceTable (pt : PieceTable) (pattern : ByteArray) : Array (
             | none => acc
     loop (total + 1) 0 Lean.RBMap.empty #[] #[]
 
-def replaceFirstInLine (line : String) (old : String) (new : String) : String :=
-  if old.isEmpty then
-    line
-  else
-    let parts := line.splitOn old
-    match parts with
-    | [] => line
-    | p :: rest =>
-        if rest.isEmpty then
-          line
-        else
-          p ++ new ++ (String.intercalate old rest)
-
-def replaceAllInLine (line : String) (old : String) (new : String) : String :=
-  if old.isEmpty then
-    line
-  else
-    String.intercalate new (line.splitOn old)
-
 def parseSubstitute (cmd : String) : Option (Bool × String × String × String) :=
   let (isGlobal, rest) :=
     if cmd.startsWith "%s/" then

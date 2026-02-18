@@ -679,9 +679,6 @@ end
 def findPrevStart (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
   findPrevStartCore tabStop buffer row col (wordMoveFuel buffer)
 
-def consumeWordBackward (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
-  consumeWordBackwardCore tabStop buffer row col wantKw (wordMoveFuel buffer)
-
 /-- Move backward to start of previous word (b) -/
 def EditorState.moveWordBackward (s : EditorState) : EditorState :=
   let tabStop := s.config.tabStop
@@ -746,9 +743,6 @@ end
 
 def findNextEnd (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) : Row × Col :=
   findNextEndCore tabStop buffer row col (wordMoveFuel buffer)
-
-def consumeWordToEnd (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) (wantKw : Bool) : Row × Col :=
-  consumeWordToEndCore tabStop buffer row col wantKw (wordMoveFuel buffer)
 
 /-- Move to end of word (e) -/
 def EditorState.moveWordEnd (s : EditorState) : EditorState :=
