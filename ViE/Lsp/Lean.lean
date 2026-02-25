@@ -108,6 +108,27 @@ def fileUri (path : String) : String :=
       "/" ++ path
   s!"file://{encodeUriPath absPath}"
 
+private def resolvePathForUri (workspaceRoot : Option String) (path : String) : IO String := do
+  let candidate : System.FilePath ←
+    if path.startsWith "/" then
+      pure (System.FilePath.mk path)
+    else
+      match workspaceRoot with
+      | some root =>
+          pure <| System.FilePath.mk (root ++ "/" ++ path)
+      | none =>
+          let cwd ← IO.currentDir
+          pure <| System.FilePath.mk (cwd.toString ++ "/" ++ path)
+  try
+    let rp ← IO.FS.realPath candidate
+    pure rp.toString
+  catch _ =>
+    pure candidate.normalize.toString
+
+def fileUriWithWorkspace (workspaceRoot : Option String) (path : String) : IO String := do
+  let absPath ← resolvePathForUri workspaceRoot path
+  pure (fileUri absPath)
+
 private def mkRequest (id : Nat) (method : String) (params : Lean.Json) : Lean.Json :=
   Lean.Json.mkObj [
     ("jsonrpc", .str "2.0"),
@@ -574,10 +595,13 @@ private def startServer (root : Option String) : IO LspChild := do
   }
 
 private def initializeServer (session : Session) : IO Session := do
-  let rootUri :=
+  let rootUri ←
     match session.rootPath with
-    | some p => Lean.Json.str (fileUri p)
-    | none => Lean.Json.null
+    | some p => do
+        let uri ← fileUriWithWorkspace none p
+        pure (Lean.Json.str uri)
+    | none =>
+        pure Lean.Json.null
   let initParams := Lean.Json.mkObj [
     ("processId", Lean.Json.null),
     ("rootUri", rootUri),
@@ -601,7 +625,7 @@ private def syncBuffer (session : Session) (buf : FileBuffer) : IO Session := do
       if !isLeanPath path then
         pure session
       else
-        let uri := fileUri path
+        let uri ← fileUriWithWorkspace session.rootPath path
         let version := (session.versions.find? uri).getD 0
         let nextVersion := version + 1
         let text := buf.table.toString
@@ -903,7 +927,7 @@ private def requestHoverCandidatesForPointIfRunning (path : String) (line cursor
         | some _ =>
             sessionRef.set none
         | none =>
-            let uri := fileUri path
+            let uri ← fileUriWithWorkspace s.rootPath path
             let mut session := s
             for lspCol in lspCols do
               session ← requestHover session uri line lspCol cursorCol
@@ -1019,7 +1043,7 @@ def requestCompletionForActiveIfRunning (state : EditorState) : IO EditorState :
                 let endIdx := ViE.Unicode.displayColToCharIndexWithTabStop lineStr state.config.tabStop cursor.col.val
                 let chars := lineStr.toList
                 let query := String.ofList (chars.drop startIdx |>.take (endIdx - startIdx))
-                let uri := fileUri path
+                let uri ← fileUriWithWorkspace s.rootPath path
                 let line := cursor.row.val
                 let lspCol := cursor.col.val
                 let s' ← requestCompletion s uri line lspCol cursor.row.val cursor.col.val query
@@ -1039,10 +1063,13 @@ private def syncCompletionPopupFromUi (state : EditorState) : IO EditorState := 
   match st.completion with
   | none => pure state
   | some (uri, popup) =>
-      let matchesActive :=
+      let matchesActive ←
         match state.getActiveBuffer.filename with
-        | some path => fileUri path == uri
-        | none => false
+        | some path =>
+            let activeUri ← fileUriWithWorkspace state.getCurrentWorkspace.rootPath path
+            pure (activeUri == uri)
+        | none =>
+            pure false
       let cursor := state.getCursor
       let sameLine := cursor.row.val == popup.anchorRow
       if state.mode == .insert && matchesActive && sameLine then
@@ -1050,7 +1077,7 @@ private def syncCompletionPopupFromUi (state : EditorState) : IO EditorState := 
       else
         pure state
 
-private def formatInfoViewContent (tabStop : Nat) (sourceView : ViewState) (sourceBuf : FileBuffer) : IO String := do
+private def formatInfoViewContent (workspaceRoot : Option String) (tabStop : Nat) (sourceView : ViewState) (sourceBuf : FileBuffer) : IO String := do
   let fileLabel := sourceBuf.filename.getD "[No Name]"
   let cursor := sourceView.cursor
   let line := cursor.row.val + 1
@@ -1062,7 +1089,10 @@ private def formatInfoViewContent (tabStop : Nat) (sourceView : ViewState) (sour
     | some off => toString off
     | none => "-"
 
-  let uri := match sourceBuf.filename with | some p => fileUri p | none => ""
+  let uri ←
+    match sourceBuf.filename with
+    | some p => fileUriWithWorkspace workspaceRoot p
+    | none => pure ""
   let lineStr := ViE.getLineFromBuffer sourceBuf cursor.row |>.getD ""
   let cursorUtf16Col := utf16ColFromDisplayCol lineStr tabStop cursor.col.val
   let st ← uiStateRef.get
@@ -1098,7 +1128,7 @@ private def formatInfoViewContent (tabStop : Nat) (sourceView : ViewState) (sour
   pure (String.intercalate "\n" lines.toList)
 
 private def updateInfoViewContent (state : EditorState) (infoBufId : Nat) (sourceView : ViewState) (sourceBuf : FileBuffer) : IO EditorState := do
-  let content ← formatInfoViewContent state.config.tabStop sourceView sourceBuf
+  let content ← formatInfoViewContent state.getCurrentWorkspace.rootPath state.config.tabStop sourceView sourceBuf
   pure <| state.updateCurrentWorkspace fun ws =>
     let newBuffers := ws.buffers.map fun b =>
       if b.id == infoBufId then

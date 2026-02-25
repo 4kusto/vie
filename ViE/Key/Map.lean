@@ -353,11 +353,12 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
               pendingSearch := false
           }
       }
-    | Key.char 'q' => pure $ s.setMode Mode.command
+    | Key.char 'q' => pure { s with message := "macro recording not implemented", dirty := true }
     | Key.char 'o' => pure $ (EditorState.insertLineBelow s).setMode Mode.insert
     | Key.char 'O' => pure $ (EditorState.insertLineAbove s).setMode Mode.insert
     | Key.char 'v' => pure $ EditorState.startVisualMode s
-    | Key.char 'V' => pure $ EditorState.startVisualBlockMode s
+    | Key.char 'V' => pure $ EditorState.startVisualMode s
+    | Key.ctrl 'v' => pure $ EditorState.startVisualBlockMode s
     | Key.char '0' =>
      if s.inputState.countBuffer.isEmpty then handleMotion s EditorState.moveToLineStart
      else

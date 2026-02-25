@@ -18,6 +18,10 @@ def test : IO Unit := do
 
   let uriRel := ViE.Lsp.Lean.fileUri "tmp/test.lean"
   assertEqual "fileUri normalizes relative path with leading slash" "file:///tmp/test.lean" uriRel
+  let uriWs ← ViE.Lsp.Lean.fileUriWithWorkspace (some "/tmp/ws") "dir/a b.lean"
+  assertEqual "fileUriWithWorkspace resolves relative path from workspace root" "file:///tmp/ws/dir/a%20b.lean" uriWs
+  let uriWsAbs ← ViE.Lsp.Lean.fileUriWithWorkspace (some "/tmp/ws") "/tmp/alt/x.lean"
+  assertEqual "fileUriWithWorkspace keeps absolute path priority" "file:///tmp/alt/x.lean" uriWsAbs
 
   let okResp : Lean.Json := Lean.Json.mkObj [("id", (12 : Lean.Json)), ("result", Lean.Json.null)]
   let errResp : Lean.Json := Lean.Json.mkObj [("id", (13 : Lean.Json)), ("error", Lean.Json.mkObj [("code", (1 : Lean.Json))])]

@@ -114,6 +114,15 @@ def testEditing : IO Unit := do
   let s_A ← runKeys s_a [Key.char '0', Key.char 'A', Key.char 'z', Key.esc]
   assertBuffer "A appends at end" s_A "xyz"
 
+  let s_q ← runKeys s0 [Key.char 'q']
+  assertEqual "q does not enter command mode" Mode.normal s_q.mode
+
+  let s_V ← runKeys s0 [Key.char 'V']
+  assertEqual "V enters visual mode" Mode.visual s_V.mode
+
+  let s_ctrlV ← runKeys s0 [Key.ctrl 'v']
+  assertEqual "Ctrl-v enters visual block mode" Mode.visualBlock s_ctrlV.mode
+
   let s_tab_insert ← runKeys s0 [Key.char 'i', Key.char '\t']
   assertCursor "Tab advances cursor to next tab stop in insert mode" s_tab_insert 0 4
 
@@ -236,7 +245,7 @@ def testVisual : IO Unit := do
 
   -- visual block yank/paste cursor position
   let s_blk0 ← runKeys s0 ([Key.char 'i'] ++ keys "abcd\nefgh" ++ [Key.esc] ++ [Key.char 'g', Key.char 'g', Key.char '0'])
-  let s_blkY ← runKeys s_blk0 [Key.char 'l', Key.char 'V', Key.char 'l', Key.char 'j', Key.char 'y']
+  let s_blkY ← runKeys s_blk0 [Key.char 'l', Key.ctrl 'v', Key.char 'l', Key.char 'j', Key.char 'y']
   let s_blkP ← runKeys s_blkY [Key.char 'g', Key.char 'g', Key.char '0', Key.char 'p']
   assertBuffer "visual block y/p inserts block" s_blkP "abcbcd\nefgfgh"
   assertCursor "visual block paste cursor at block start" s_blkP 0 1
@@ -246,7 +255,7 @@ def testVisual : IO Unit := do
   assertCursor "visual block P cursor at block start" s_blkP2 0 0
 
   let s_blkD0 ← runKeys s0 ([Key.char 'i'] ++ keys "abcd\nefgh" ++ [Key.esc] ++ [Key.char 'g', Key.char 'g', Key.char '0'])
-  let s_blkD ← runKeys s_blkD0 [Key.char 'l', Key.char 'V', Key.char 'l', Key.char 'j', Key.char 'd']
+  let s_blkD ← runKeys s_blkD0 [Key.char 'l', Key.ctrl 'v', Key.char 'l', Key.char 'j', Key.char 'd']
   assertBuffer "visual block d deletes block" s_blkD "ad\neh"
   match s_blkD.clipboard with
   | some reg =>
@@ -730,7 +739,7 @@ def testUiCommands : IO Unit := do
 
   let s28 ← runKeys s0 ([Key.char 'i'] ++ keys "abcd\nefgh\n" ++ [Key.esc] ++ keys "gg0")
   let s29 ← runKeys s28 ([Key.char ':'] ++ keys "floatwin on" ++ [Key.enter])
-  let s30 ← runKeys s29 [Key.char 'l', Key.char 'V', Key.char 'l', Key.char 'j', Key.char 'd']
+  let s30 ← runKeys s29 [Key.char 'l', Key.ctrl 'v', Key.char 'l', Key.char 'j', Key.char 'd']
   assertBuffer "visual block edits active floating window buffer" s30 "ad\neh\n"
 
 def testBufferExplorerCommand : IO Unit := do

@@ -52,12 +52,13 @@ clone this source and place or symlink this source under the '~/.config/vie/' di
 - `e`: Move forward to end of word
 - `i`: Enter Insert Mode
 - `:`; Enter Command Mode
-- `q`: Enter Command Mode (alias)
+- `q`: (reserved for macro recording; not implemented)
 - `d`: Delete current line (press twice `dd`)
 - `cw`: Change word
 - `x`: Delete character
 - `v`: Enter Visual Mode
-- `V`: Enter VisualBlock Mode
+- `V`: Enter Visual Mode
+- `Ctrl-v`: Enter VisualBlock Mode
 - `y`: yank current line
 - `p`: paste yanked line
 - `P`: paste yanked line above
