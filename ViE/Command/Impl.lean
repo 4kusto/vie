@@ -236,12 +236,9 @@ def cmdWinCycle (_ : List String) (state : EditorState) : IO EditorState := retu
 
 def cmdCd (args : List String) (state : EditorState) : IO EditorState :=
   match args with
-  | [path] =>
+  | [path] => do
     let ws := state.getCurrentWorkspace
-    let absPath := if path.startsWith "/" then path
-                   else match ws.rootPath with
-                        | some root => root ++ "/" ++ path
-                        | none => path
+    let absPath ← ViE.resolveAbsolutePath ws.rootPath path
     let s' := state.updateCurrentWorkspace fun ws =>
       { ws with rootPath := some absPath, name := ws.name }
     return { s' with message := s!"Workspace path: {absPath}" }
@@ -361,13 +358,6 @@ def cmdWs (args : List String) (state : EditorState) : IO EditorState :=
   let wg := state.getCurrentWorkgroup
   let maxBufId := wg.workspaces.foldl (fun m ws => max m ws.nextBufferId) 0
 
-  let resolvePath (p : String) : String :=
-    if p.startsWith "/" then p
-    else
-      match state.getCurrentWorkspace.rootPath with
-      | some root => root ++ "/" ++ p
-      | none => p
-
   let parseOpenArgs (rest : List String) : Option (Option String × String) :=
     match rest with
     | ["--name", name, path] => some (some name, path)
@@ -379,10 +369,10 @@ def cmdWs (args : List String) (state : EditorState) : IO EditorState :=
   match args with
   | ["list"] =>
     ViE.Feature.openWorkspaceExplorer state
-  | "open" :: rest =>
+  | "open" :: rest => do
     match parseOpenArgs rest with
     | some (maybeName, path) =>
-      let absPath := resolvePath path
+      let absPath ← ViE.resolveAbsolutePath state.getCurrentWorkspace.rootPath path
       let name := maybeName.getD ((System.FilePath.fileName absPath).getD "Workspace")
       let newWs := makeWorkspaceState name (some absPath) maxBufId
       let newState := state.updateCurrentWorkgroup fun wg =>
@@ -417,12 +407,12 @@ def cmdWs (args : List String) (state : EditorState) : IO EditorState :=
           currentWorkspace := wg.workspaces.size
         }
       return { newState with message := s!"Created workspace: {trimmed}" }
-  | ["new", name, path] =>
+  | ["new", name, path] => do
     let trimmed := name.trimAscii.toString
     if trimmed.isEmpty then
       return { state with message := "Workspace name cannot be empty" }
-    else
-    let absPath := resolvePath path
+    else do
+      let absPath ← ViE.resolveAbsolutePath state.getCurrentWorkspace.rootPath path
       let newWs := makeWorkspaceState trimmed (some absPath) maxBufId
       let newState := state.updateCurrentWorkgroup fun wg =>
         { wg with

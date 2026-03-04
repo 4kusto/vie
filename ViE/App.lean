@@ -9,6 +9,7 @@ import ViE.Config
 import ViE.Checkpoint
 import ViE.Loader
 import ViE.Lsp.Lean
+import ViE.Workspace
 
 namespace ViE
 
@@ -17,20 +18,24 @@ namespace ViE
 def resolveStartupTarget (filename : Option String) : IO (Option String × Option String) := do
   match filename with
   | some path =>
-    let filePath := System.FilePath.mk path
+    let absPath ← ViE.resolveAbsolutePath none path
+    let filePath := System.FilePath.mk absPath
     if ← filePath.pathExists then
       if ← filePath.isDir then
         -- It's a directory, use as workspace
-        pure (some path, none)
+        pure (some absPath, none)
       else
         -- It's a file, use its parent directory as workspace
         let parentDir := match filePath.parent with
           | some p => p.toString
-          | none => "."
-        pure (some parentDir, some path)
+          | none => "/"
+        pure (some parentDir, some absPath)
     else
-      -- Path doesn't exist, treat as new file
-      pure (none, some path)
+      -- Path doesn't exist yet: still anchor workspace resolution at its parent.
+      let parentDir := match filePath.parent with
+        | some p => p.toString
+        | none => "/"
+      pure (some parentDir, some absPath)
   | none => pure (none, none)
 
 def clampCursorInBuffer (tabStop : Nat) (buffer : FileBuffer) (row : Row) (col : Col) : Point :=

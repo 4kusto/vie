@@ -106,6 +106,23 @@ def test : IO Unit := do
   assertEqual "Workspace open --name suffix" "Project F" s11.getCurrentWorkspace.name
   assertEqual "Workspace open --name suffix rootPath" (some "/tmp/project-f") s11.getCurrentWorkspace.rootPath
 
+  IO.println "Starting Workspace Relative Path Resolution Test..."
+  let stamp ← IO.monoMsNow
+  let relBase := s!"/tmp/vie-ws-rel-{stamp}"
+  IO.FS.createDirAll (System.FilePath.mk relBase)
+  let sRel0 := s11.updateCurrentWorkspace fun ws =>
+    { ws with rootPath := some relBase, name := "RelBase" }
+
+  let sRel1 ← ViE.Command.cmdCd ["child"] sRel0
+  assertEqual "cd relative resolves from workspace root" (some s!"{relBase}/child") sRel1.getCurrentWorkspace.rootPath
+
+  let sRel2 ← ViE.Command.cmdWs ["open", "nested"] sRel0
+  assertEqual "ws open relative resolves from workspace root" (some s!"{relBase}/nested") sRel2.getCurrentWorkspace.rootPath
+  assertEqual "ws open relative uses basename from absolute path" "nested" sRel2.getCurrentWorkspace.name
+
+  let sRel3 ← ViE.Command.cmdWs ["new", "RelChild", "child2"] sRel0
+  assertEqual "ws new relative resolves from workspace root" (some s!"{relBase}/child2") sRel3.getCurrentWorkspace.rootPath
+
   let s12 ← ViE.Command.cmdWs ["close"] s11
   assertEqual "Workspace close switches to previous" "Project E" s12.getCurrentWorkspace.name
 
@@ -284,27 +301,46 @@ def test : IO Unit := do
 
   IO.println "Starting Workspace Startup Target Test..."
   let base := "Test/test_paths"
+  let absBase ← ViE.resolveAbsolutePath none base
 
   let dirOnly := s!"{base}/dir0"
+  let absDirOnly ← ViE.resolveAbsolutePath none dirOnly
   let (wsDirOnly, fileDirOnly) ← ViE.resolveStartupTarget (some dirOnly)
-  assertEqual "Directory arg sets workspace" (some dirOnly) wsDirOnly
+  assertEqual "Directory arg sets workspace" (some absDirOnly) wsDirOnly
   assertEqual "Directory arg has no file" none fileDirOnly
 
   let fileNested := s!"{base}/dir0/dir1/dir2/file0.txt"
+  let absFileNested ← ViE.resolveAbsolutePath none fileNested
+  let nestedParent := match (System.FilePath.mk absFileNested).parent with
+    | some p => p.toString
+    | none => "/"
   let (wsFileNested, fileFileNested) ← ViE.resolveStartupTarget (some fileNested)
-  assertEqual "File arg sets workspace to parent dir" (some s!"{base}/dir0/dir1/dir2") wsFileNested
-  assertEqual "File arg keeps filename" (some fileNested) fileFileNested
+  assertEqual "File arg sets workspace to parent dir" (some nestedParent) wsFileNested
+  assertEqual "File arg keeps filename" (some absFileNested) fileFileNested
 
   let fileTop := s!"{base}/file0.txt"
+  let absFileTop ← ViE.resolveAbsolutePath none fileTop
   let (wsFileTop, fileFileTop) ← ViE.resolveStartupTarget (some fileTop)
-  assertEqual "Top-level file sets workspace to base" (some base) wsFileTop
-  assertEqual "Top-level file keeps filename" (some fileTop) fileFileTop
+  assertEqual "Top-level file sets workspace to base" (some absBase) wsFileTop
+  assertEqual "Top-level file keeps filename" (some absFileTop) fileFileTop
+
+  let newNested := s!"{base}/newdir/newfile.txt"
+  let absNewNested ← ViE.resolveAbsolutePath none newNested
+  let newNestedParent := match (System.FilePath.mk absNewNested).parent with
+    | some p => p.toString
+    | none => "/"
+  let (wsNewNested, fileNewNested) ← ViE.resolveStartupTarget (some newNested)
+  assertEqual "Nonexistent file sets workspace to parent dir" (some newNestedParent) wsNewNested
+  assertEqual "Nonexistent file keeps absolute filename" (some absNewNested) fileNewNested
 
   IO.println "Starting Explorer Path Resolution Test..."
+  let absTest ← ViE.resolveAbsolutePath none "Test"
   let s13 := s12.updateCurrentWorkspace fun ws =>
-    { ws with rootPath := some "Test", name := "Test" }
-  let s14 ← ViE.Feature.openExplorer s13 "Test"
-  assertEqual "Explorer opens workspace root without duplication" (some "explorer://Test") s14.getActiveBuffer.filename
+    { ws with rootPath := some absTest, name := "Test" }
+  let s14 ← ViE.Feature.openExplorer s13 "."
+  assertEqual "Explorer opens absolute workspace root from dot" (some s!"explorer://{absTest}") s14.getActiveBuffer.filename
+  let s15 ← ViE.Feature.openExplorer s13 "test_paths"
+  assertEqual "Explorer resolves relative path from absolute workspace root" (some s!"explorer://{absTest}/test_paths") s15.getActiveBuffer.filename
 
   IO.println "WorkspaceTest passed!"
 
