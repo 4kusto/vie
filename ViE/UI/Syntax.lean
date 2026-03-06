@@ -1,13 +1,10 @@
 import ViE.UI.Syntax.Types
 import ViE.UI.Syntax.Lean
 import ViE.UI.Syntax.Markdown
+import Bliku.Tui.Syntax
 
 namespace ViE.UI.Syntax
 
-def highlightLine (filename : Option String) (line : String) : Array Span :=
-  match detectLanguage filename with
-  | .plain => #[]
-  | .lean => highlightLeanLine line
-  | .markdown => highlightMarkdownLine line
+abbrev highlightLine := Bliku.Tui.Syntax.highlightLine
 
 end ViE.UI.Syntax

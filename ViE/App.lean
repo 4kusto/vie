@@ -2,7 +2,8 @@ import Lean
 import ViE.Basic
 import ViE.State
 import ViE.Terminal
-import ViE.UI
+import Bliku.Tui
+import ViE.BlikuAdapter
 import ViE.Actions
 import ViE.IO
 import ViE.Config
@@ -117,7 +118,7 @@ def loop (config : Config) (state0 : EditorState) : IO Unit := do
   while !quit do
     -- Only render if state is dirty
     state ← if state.dirty then
-      ViE.UI.render state
+      ViE.BlikuAdapter.render state
     else
       pure state
 

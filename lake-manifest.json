@@ -1,5 +1,15 @@
 {"version": "1.1.0",
  "packagesDir": ".lake/packages",
- "packages": [],
- "name": "editor",
+ "packages":
+ [{"url": "https://github.com/4kusto/bliku",
+   "type": "git",
+   "subDir": null,
+   "scope": "",
+   "rev": "2836947f0090b29b45b4f012db0a274fb2ac8aee",
+   "name": "bliku",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": null,
+   "inherited": false,
+   "configFile": "lakefile.lean"}],
+ "name": "vie",
  "lakeDir": ".lake"}

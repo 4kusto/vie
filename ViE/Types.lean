@@ -123,6 +123,9 @@ structure EditorConfig where
   dirIcon : String
   searchHighlightStyle : String
   searchHighlightCursorStyle : String
+  visualSelectionStyle : String
+  cursorCharStyle : String
+  cursorSpaceStyle : String
   tabStop : Nat := 4
   searchBloomCacheMax : Nat
   searchBloomBuildLeafBits : Bool
