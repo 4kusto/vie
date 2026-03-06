@@ -2,6 +2,7 @@ import ViE.State.Config
 import ViE.Command.Explorer
 import ViE.Window.Analysis
 import ViE.Window.Actions
+import ViE.BlikuAdapter
 import Test.Utils
 
 namespace Test.ExplorerPreview
@@ -28,7 +29,16 @@ def test : IO Unit := do
   let s1 ← ViE.Feature.openExplorer s0 path
   let buf := s1.getActiveBuffer
   let ws1 := s1.getCurrentWorkspace
-  assert "File explorer opens in floating window" (ws1.isFloatingWindow ws1.activeWindowId)
+  assert "File explorer opens in regular window" (!ws1.isFloatingWindow ws1.activeWindowId)
+  let model1 := ViE.BlikuAdapter.toModel s1
+  let explorerClustered :=
+    match model1.workspace.floatingClusters[0]? with
+    | some cluster =>
+        match cluster.root, cluster.sizePolicy with
+        | .group gid, .multiPane => gid == buf.id
+        | _, _ => false
+    | none => false
+  assert "Bliku adapter lifts explorer/preview into floating multi-pane cluster" explorerClustered
   let baseBufId := s0.getActiveBuffer.id
   let baseWinId :=
     (ViE.Window.getWindowIds ws1.layout).find? (fun wid =>
@@ -64,21 +74,23 @@ def test : IO Unit := do
     | none => throw (IO.userError "Explorer buffer not registered after open")
     | some exOpen =>
       assert "Preview window created on open" exOpen.previewWindowId.isSome
-      let previewFloating :=
+      let previewRegular :=
         match exOpen.previewWindowId with
-        | some wid => s1.getCurrentWorkspace.isFloatingWindow wid
+        | some wid => !s1.getCurrentWorkspace.isFloatingWindow wid
         | none => false
-      assert "Preview window opens in floating window" previewFloating
+      assert "Preview window opens in regular window" previewRegular
       let pairSideBySide :=
         match exOpen.previewWindowId with
         | some wid =>
-          let ws1 := s1.getCurrentWorkspace
-          match s1.getFloatingWindowBounds ws1.activeWindowId, s1.getFloatingWindowBounds wid with
-          | some (et, el, eh, ew), some (pt, pl, ph, pw) =>
+          let bounds := ViE.Window.getAllWindowBounds s1.getCurrentWorkspace.layout
+            (if s1.windowHeight > 0 then s1.windowHeight - 1 else 0) s1.windowWidth
+          match bounds.find? (fun (id, _, _, _, _) => id == s1.getCurrentWorkspace.activeWindowId),
+                bounds.find? (fun (id, _, _, _, _) => id == wid) with
+          | some (_, et, el, eh, ew), some (_, pt, pl, ph, pw) =>
             et == pt && eh == ph && ((el + ew <= pl) || (pl + pw <= el))
           | _, _ => false
         | none => false
-      assert "Explorer/preview floating pair is side-by-side" pairSideBySide
+      assert "Explorer/preview pair is side-by-side" pairSideBySide
 
     let s2 := s1.updateActiveView fun v => { v with cursor := { row := row1, col := 0 } }
     let s3 ← ViE.Feature.refreshExplorerPreview s2
@@ -122,7 +134,7 @@ def test : IO Unit := do
       let explorerWinId := s5a.getCurrentWorkspace.activeWindowId
       let s5b ← ViE.Feature.handleExplorerEnter s5a
       let ws5b := s5b.getCurrentWorkspace
-      assert "Opening file from floating explorer leaves non-floating window" (!ws5b.isFloatingWindow ws5b.activeWindowId)
+      assert "Opening file from explorer leaves regular window" (!ws5b.isFloatingWindow ws5b.activeWindowId)
       match baseWinId with
       | some wid =>
           assert "Opening file from explorer uses original buffer window" (ws5b.activeWindowId == wid)

@@ -36,7 +36,7 @@ def test : IO Unit := do
   let s2 ← ViE.Command.cmdWg ["list"] s1
   assertEqual "Explorer buffer is active" (some "explorer://workgroups") s2.getActiveBuffer.filename
   let ws2 := s2.getCurrentWorkspace
-  assertEqual "Workgroup explorer opens in floating window" true (ws2.isFloatingWindow ws2.activeWindowId)
+  assertEqual "Workgroup explorer opens in regular window" false (ws2.isFloatingWindow ws2.activeWindowId)
 
   let bufText := s2.getActiveBuffer.table.toString
   assertEqual "Explorer contains Workgroup header" true (bufText.contains "Workgroup Explorer")
@@ -53,13 +53,14 @@ def test : IO Unit := do
     assertEqual "Workgroup explorer preview window exists" true explorer.previewWindowId.isSome
     let previewWinId := explorer.previewWindowId.get!
     let wsPrev := s2.getCurrentWorkspace
-    assertEqual "Workgroup explorer preview window is floating" true (wsPrev.isFloatingWindow previewWinId)
+    assertEqual "Workgroup explorer preview window is regular" false (wsPrev.isFloatingWindow previewWinId)
     let pairSideBySide :=
-      match s2.getFloatingWindowBounds wsPrev.activeWindowId, s2.getFloatingWindowBounds previewWinId with
-      | some (et, el, eh, ew), some (pt, pl, ph, pw) =>
+      match (ViE.Window.getAllWindowBounds wsPrev.layout (if s2.windowHeight > 0 then s2.windowHeight - 1 else 0) s2.windowWidth).find? (fun (id, _, _, _, _) => id == wsPrev.activeWindowId),
+            (ViE.Window.getAllWindowBounds wsPrev.layout (if s2.windowHeight > 0 then s2.windowHeight - 1 else 0) s2.windowWidth).find? (fun (id, _, _, _, _) => id == previewWinId) with
+      | some (_, et, el, eh, ew), some (_, pt, pl, ph, pw) =>
           et == pt && eh == ph && ((el + ew <= pl) || (pl + pw <= el))
       | _, _ => false
-    assertEqual "Workgroup explorer/preview floating pair is side-by-side" true pairSideBySide
+    assertEqual "Workgroup explorer/preview pair is side-by-side" true pairSideBySide
     let previewView := wsPrev.layout.findView previewWinId |>.getD initialView
     let previewBuf := wsPrev.buffers.find? (fun b => b.id == previewView.bufferId) |>.getD initialBuffer
     let previewText := previewBuf.table.toString

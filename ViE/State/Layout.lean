@@ -172,7 +172,7 @@ def WorkspaceState.pruneFloatingWindows (ws : WorkspaceState) : WorkspaceState :
   }
 
 def WorkspaceState.getFloatingWindowIds (ws : WorkspaceState) : Array Nat :=
-  ws.floatingWindows.foldl (fun acc wid =>
+  ws.floatingWindows.reverse.foldl (fun acc wid =>
     match ws.layout.findView wid with
     | some _ => acc.push wid
     | none => acc) #[]

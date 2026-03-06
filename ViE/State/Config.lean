@@ -27,6 +27,7 @@ def defaultConfig : EditorConfig := {
   visualSelectionStyle := "\x1b[7m"
   cursorCharStyle := (ViE.Color.toBg .white) ++ (ViE.Color.toFg .black)
   cursorSpaceStyle := (ViE.Color.toBg .white) ++ (ViE.Color.toFg .black)
+  explorerPreviewSplitRatio := 0.5
   tabStop := 4
   searchBloomCacheMax := 1024
   searchBloomBuildLeafBits := true

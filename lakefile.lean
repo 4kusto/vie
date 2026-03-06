@@ -6,7 +6,7 @@ package vie where
   buildType := .release
   testDriver := "test"
 
-require bliku from git "https://github.com/4kusto/bliku"
+require bliku from git "https://github.com/4kusto/bliku" @ "main"
 
 lean_lib ViE
 

@@ -5,12 +5,49 @@ open ViE.Color
 
 def customConfig : ViE.EditorConfig := {
   ViE.defaultConfig with
+  -- View
   showLineNumbers := true
   emptyLineMarker := "・"
+
+  -- Splits
+  vSplitStr := "│"
+  hSplitStr := "─"
+
+  -- Cursor / selection / search
+  searchHighlightStyle := (toBg Color.white) ++ (toFg Color.black)
+  searchHighlightCursorStyle := (toBg Color.yellow) ++ (toFg Color.black)
+  visualSelectionStyle := "\x1b[7m"
+  cursorCharStyle := (toBg Color.white) ++ (toFg Color.black)
+  cursorSpaceStyle := (toBg Color.white) ++ (toFg Color.black)
+
+  -- Explorer / preview
+  explorerPreviewSplitRatio := 0.5
+
+  -- Editing
   tabStop := 2
+
+  -- Status line / terminal reset
   statusBarStyle := (toBg Color.brightBlack) ++ (toFg Color.white)
-  --fileIcon := "File: "
-  --dirIcon := "Dir : "
+  resetStyle := ViE.Color.reset
+
+  -- Explorer icons
+  fileIcon := "📄 "
+  dirIcon := "📁 "
+
+  -- Search bloom cache
+  searchBloomCacheMax := 1024
+  searchBloomBuildLeafBits := true
+  searchBloomBuildOnEdit := false
+
+  -- History
+  historyLimit := 200
+
+  -- Examples:
+  -- fileIcon := "File: "
+  -- dirIcon := "Dir : "
+  -- explorerPreviewSplitRatio := 0.62
+  -- tabStop := 4
+  -- showLineNumbers := false
 }
 
 def customKeyMap (commands : ViE.CommandMap) : ViE.KeyMap := {

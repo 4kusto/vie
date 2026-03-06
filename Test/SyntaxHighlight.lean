@@ -1,6 +1,6 @@
-import ViE.UI.Syntax
 import ViE.UI.Search
 import Test.Utils
+import Bliku.Tui.Syntax
 
 open Test.Utils
 
@@ -11,21 +11,26 @@ private def firstRangeOf (line : String) (pat : String) : Option (Nat × Nat) :=
 
 def testLean : IO Unit := do
   let line := "def x := 42 -- comment"
-  let spans := ViE.UI.Syntax.highlightLine (some "Main.lean") line
+  let spans := Bliku.Tui.Syntax.highlightLine (some "Main.lean") line
   let (defS, defE) := (firstRangeOf line "def").getD (0, 0)
   let (numS, numE) := (firstRangeOf line "42").getD (0, 0)
   let (comS, comE) := (firstRangeOf line "-- comment").getD (0, 0)
-  assertEqual "Lean keyword style" (some ViE.UI.Syntax.leanKeywordStyle) (ViE.UI.Syntax.styleForByteRange spans defS defE)
-  assertEqual "Lean number style" (some ViE.UI.Syntax.leanNumberStyle) (ViE.UI.Syntax.styleForByteRange spans numS numE)
-  assertEqual "Lean comment style" (some ViE.UI.Syntax.leanCommentStyle) (ViE.UI.Syntax.styleForByteRange spans comS comE)
+  assertEqual "Lean keyword style" (Bliku.Tui.Syntax.defaultPalette.faceFor .keyword)
+    (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette spans defS defE)
+  assertEqual "Lean number style" (Bliku.Tui.Syntax.defaultPalette.faceFor .numberLiteral)
+    (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette spans numS numE)
+  assertEqual "Lean comment style" (Bliku.Tui.Syntax.defaultPalette.faceFor .comment)
+    (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette spans comS comE)
 
 def testMarkdown : IO Unit := do
   let line := "Use `code` and [link](url)"
-  let spans := ViE.UI.Syntax.highlightLine (some "README.md") line
+  let spans := Bliku.Tui.Syntax.highlightLine (some "README.md") line
   let (codeS, codeE) := (firstRangeOf line "`code`").getD (0, 0)
   let (linkS, linkE) := (firstRangeOf line "[link](url)").getD (0, 0)
-  assertEqual "Markdown code style" (some ViE.UI.Syntax.markdownCodeStyle) (ViE.UI.Syntax.styleForByteRange spans codeS codeE)
-  assertEqual "Markdown link style" (some ViE.UI.Syntax.markdownLinkStyle) (ViE.UI.Syntax.styleForByteRange spans linkS linkE)
+  assertEqual "Markdown code style" (Bliku.Tui.Syntax.defaultPalette.faceFor .code)
+    (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette spans codeS codeE)
+  assertEqual "Markdown link style" (Bliku.Tui.Syntax.defaultPalette.faceFor .link)
+    (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette spans linkS linkE)
 
 def test : IO Unit := do
   IO.println "Starting SyntaxHighlight Test..."

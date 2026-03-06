@@ -17,6 +17,40 @@ def previewMaxBytes : Nat := 65536
 def updateExplorerState (state : EditorState) (bufId : Nat) (f : ExplorerState → ExplorerState) : EditorState :=
   { state with explorers := state.explorers.map (fun (id, ex) => if id == bufId then (id, f ex) else (id, ex)) }
 
+private partial def setSplitRatioForPair (layout : Layout) (leftId rightId : Nat) (ratio : Float) : Layout :=
+  match layout with
+  | .window _ _ => layout
+  | .hsplit left right currentRatio =>
+      let leftHasLeft := left.containsWindow leftId
+      let leftHasRight := left.containsWindow rightId
+      let rightHasLeft := right.containsWindow leftId
+      let rightHasRight := right.containsWindow rightId
+      if (leftHasLeft && rightHasRight) || (leftHasRight && rightHasLeft) then
+        .hsplit left right ratio
+      else if leftHasLeft && leftHasRight then
+        .hsplit (setSplitRatioForPair left leftId rightId ratio) right currentRatio
+      else if rightHasLeft && rightHasRight then
+        .hsplit left (setSplitRatioForPair right leftId rightId ratio) currentRatio
+      else
+        .hsplit left right currentRatio
+  | .vsplit top bottom currentRatio =>
+      let topHasLeft := top.containsWindow leftId
+      let topHasRight := top.containsWindow rightId
+      let bottomHasLeft := bottom.containsWindow leftId
+      let bottomHasRight := bottom.containsWindow rightId
+      if topHasLeft && topHasRight then
+        .vsplit (setSplitRatioForPair top leftId rightId ratio) bottom currentRatio
+      else if bottomHasLeft && bottomHasRight then
+        .vsplit top (setSplitRatioForPair bottom leftId rightId ratio) currentRatio
+      else
+        .vsplit top bottom currentRatio
+
+private def applyExplorerPreviewRatio (state : EditorState) (explorerWinId previewWinId : Nat) : EditorState :=
+  state.updateCurrentWorkspace fun ws =>
+    { ws with
+        layout := setSplitRatioForPair ws.layout explorerWinId previewWinId state.config.explorerPreviewSplitRatio
+    }
+
 private def isUsableExplorerTargetWindow (ws : WorkspaceState) (explorerWinId : Nat) (previewWinId : Option Nat)
     (explorerBufIds : List Nat) (previewBufId : Option Nat) (wid : Nat) : Bool :=
   if wid == explorerWinId then
@@ -37,12 +71,12 @@ def openActiveAsFloating (state : EditorState) : EditorState :=
 
 def openExplorerWindowsAsFloating (state : EditorState) (previewWindowId : Option Nat) : EditorState :=
   state.updateCurrentWorkspace fun ws =>
-    let ws := ws.setWindowFloating ws.activeWindowId true
+    let ws := ws.setWindowFloating ws.activeWindowId false
     let ws :=
       match previewWindowId with
       | some wid =>
           if ws.layout.findView wid |>.isSome then
-            ws.setWindowFloating wid true
+            ws.setWindowFloating wid false
           else
             ws
       | none => ws
@@ -320,8 +354,9 @@ def openExplorerDefaultPreview (state : EditorState) (bufId : Nat) (explorer : E
   | some _ => return state
   | none =>
     let ws := state.getCurrentWorkspace
+    let explorerWinId := ws.activeWindowId
     let previewWinId := ws.nextWindowId
-    let s1 := ViE.Window.splitWindow state false
+    let s1 := applyExplorerPreviewRatio (ViE.Window.splitWindow state false) explorerWinId previewWinId
     let (s2, previewBufId) ←
       match explorer.mode with
       | .files =>
@@ -403,8 +438,9 @@ def toggleExplorerPreview (state : EditorState) : IO EditorState := do
             return { state with message := "Preview: directory" }
           else
             let ws := state.getCurrentWorkspace
+            let explorerWinId := ws.activeWindowId
             let previewWinId := ws.nextWindowId
-            let s1 := ViE.Window.splitWindow state false
+            let s1 := applyExplorerPreviewRatio (ViE.Window.splitWindow state false) explorerWinId previewWinId
             let (s2, previewBufId) ← ensurePreviewBuffer s1 explorer entry
             let s3 := s2.updateCurrentWorkspace fun ws =>
               { ws with layout := ws.layout.updateView previewWinId (fun v =>
@@ -414,8 +450,9 @@ def toggleExplorerPreview (state : EditorState) : IO EditorState := do
             return { s5 with message := "Preview opened" }
       | .workspaces =>
           let ws := state.getCurrentWorkspace
+          let explorerWinId := ws.activeWindowId
           let previewWinId := ws.nextWindowId
-          let s1 := ViE.Window.splitWindow state false
+          let s1 := applyExplorerPreviewRatio (ViE.Window.splitWindow state false) explorerWinId previewWinId
           let previewWs := getPreviewWorkspace s1 explorer
           let lines := buildWorkspacePreviewLines previewWs
           let (s2, previewBufId) := ensurePreviewTextBuffer s1 explorer previewWs.name lines
@@ -427,8 +464,9 @@ def toggleExplorerPreview (state : EditorState) : IO EditorState := do
           return { s5 with message := "Preview opened" }
       | .workgroups =>
           let ws := state.getCurrentWorkspace
+          let explorerWinId := ws.activeWindowId
           let previewWinId := ws.nextWindowId
-          let s1 := ViE.Window.splitWindow state false
+          let s1 := applyExplorerPreviewRatio (ViE.Window.splitWindow state false) explorerWinId previewWinId
           let previewWg := getPreviewWorkgroup s1 explorer
           let lines := buildWorkgroupPreviewLines previewWg
           let (s2, previewBufId) := ensurePreviewTextBuffer s1 explorer previewWg.name lines
@@ -444,8 +482,9 @@ def toggleExplorerPreview (state : EditorState) : IO EditorState := do
               return { state with message := "Preview: no buffer selection" }
           | some previewBufId =>
               let ws := state.getCurrentWorkspace
+              let explorerWinId := ws.activeWindowId
               let previewWinId := ws.nextWindowId
-              let s1 := ViE.Window.splitWindow state false
+              let s1 := applyExplorerPreviewRatio (ViE.Window.splitWindow state false) explorerWinId previewWinId
               let s2 := s1.updateCurrentWorkspace fun ws =>
                 { ws with layout := ws.layout.updateView previewWinId (fun v =>
                   { v with bufferId := previewBufId, cursor := Point.zero, scrollRow := 0, scrollCol := 0 }) }

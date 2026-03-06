@@ -71,7 +71,7 @@ def test : IO Unit := do
   let s8 ← ViE.Command.cmdWs ["list"] s7
   assertEqual "Workspace list opens explorer buffer" (some "explorer://workgroup") s8.getActiveBuffer.filename
   let ws8 := s8.getCurrentWorkspace
-  assertEqual "Workspace explorer opens in floating window" true (ws8.isFloatingWindow ws8.activeWindowId)
+  assertEqual "Workspace explorer opens in regular window" false (ws8.isFloatingWindow ws8.activeWindowId)
   let wsListText := s8.getActiveBuffer.table.toString
   assertEqual "Workspace list contains New Workspace entry" true (wsListText.contains "[New Workspace]")
   assertEqual "Workspace list contains Rename Workspace entry" true (wsListText.contains "[Rename Workspace]")
@@ -150,13 +150,14 @@ def test : IO Unit := do
     assertEqual "Workspace explorer preview window exists" true explorer.previewWindowId.isSome
     let previewWinId := explorer.previewWindowId.get!
     let wsPrev := s12c.getCurrentWorkspace
-    assertEqual "Workspace explorer preview window is floating" true (wsPrev.isFloatingWindow previewWinId)
+    assertEqual "Workspace explorer preview window is regular" false (wsPrev.isFloatingWindow previewWinId)
     let pairSideBySide :=
-      match s12c.getFloatingWindowBounds wsPrev.activeWindowId, s12c.getFloatingWindowBounds previewWinId with
-      | some (et, el, eh, ew), some (pt, pl, ph, pw) =>
+      match (ViE.Window.getAllWindowBounds wsPrev.layout (if s12c.windowHeight > 0 then s12c.windowHeight - 1 else 0) s12c.windowWidth).find? (fun (id, _, _, _, _) => id == wsPrev.activeWindowId),
+            (ViE.Window.getAllWindowBounds wsPrev.layout (if s12c.windowHeight > 0 then s12c.windowHeight - 1 else 0) s12c.windowWidth).find? (fun (id, _, _, _, _) => id == previewWinId) with
+      | some (_, et, el, eh, ew), some (_, pt, pl, ph, pw) =>
           et == pt && eh == ph && ((el + ew <= pl) || (pl + pw <= el))
       | _, _ => false
-    assertEqual "Workspace explorer/preview floating pair is side-by-side" true pairSideBySide
+    assertEqual "Workspace explorer/preview pair is side-by-side" true pairSideBySide
     let previewView := wsPrev.layout.findView previewWinId |>.getD initialView
     let previewBuf := wsPrev.buffers.find? (fun b => b.id == previewView.bufferId) |>.getD initialBuffer
     let previewText := previewBuf.table.toString

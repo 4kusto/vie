@@ -1,7 +1,7 @@
 import ViE.UI.Primitives
 import ViE.UI.Search
-import ViE.UI.Syntax
 import ViE.Terminal
+import Bliku.Tui.Syntax
 
 namespace ViE.UI
 open ViE
@@ -88,7 +88,7 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
       let selRange := if isVisual then state.selectionStart else none
       let (searchMatches, searchSt) := getLineSearchMatches currentSt buf.id lineIdx lineStr
       currentSt := searchSt
-      let syntaxSpans := ViE.UI.Syntax.highlightLine buf.filename lineStr
+      let syntaxSpans := Bliku.Tui.Syntax.highlightLine buf.filename lineStr
 
       let needsStyled := selRange.isSome || !searchMatches.isEmpty || !syntaxSpans.isEmpty
       if !needsStyled then
@@ -126,7 +126,8 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
               else
                 some state.config.searchHighlightStyle
             else
-              ViE.UI.Syntax.styleForByteRange syntaxSpans byteStart byteEnd
+              (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette syntaxSpans byteStart byteEnd).map
+                (fun face => face.toAnsi)
 
           if desiredStyle != activeStyle then
             match activeStyle with
@@ -201,7 +202,7 @@ def renderFloatingWindow
     let lineIdx : Row := ⟨view.scrollRow.val + i⟩
     let raw := if lineIdx.val < FileBuffer.lineCount buf then getLineFromBuffer buf lineIdx |>.getD "" else ""
     let lineIndex := ViE.Unicode.buildDisplayByteIndexWithTabStop raw st.config.tabStop
-    let syntaxSpans := ViE.UI.Syntax.highlightLine buf.filename raw
+    let syntaxSpans := Bliku.Tui.Syntax.highlightLine buf.filename raw
     let sub := ViE.Unicode.dropByDisplayWidthWithTabStop raw.toRawSubstring st.config.tabStop view.scrollCol.val
     let plainShown := ViE.Unicode.takeByDisplayWidthWithTabStop sub st.config.tabStop textW
     let shownW := Unicode.stringWidthWithTabStop plainShown st.config.tabStop
@@ -223,7 +224,8 @@ def renderFloatingWindow
               if selected then
                 some "\x1b[7m"
               else
-                ViE.UI.Syntax.styleForByteRange syntaxSpans byteStart byteEnd
+                (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette syntaxSpans byteStart byteEnd).map
+                  (fun face => face.toAnsi)
             if desiredStyle != activeStyle then
               match activeStyle with
               | some _ => styled := styled.push st.config.resetStyle

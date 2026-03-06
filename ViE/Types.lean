@@ -126,6 +126,7 @@ structure EditorConfig where
   visualSelectionStyle : String
   cursorCharStyle : String
   cursorSpaceStyle : String
+  explorerPreviewSplitRatio : Float
   tabStop : Nat := 4
   searchBloomCacheMax : Nat
   searchBloomBuildLeafBits : Bool
