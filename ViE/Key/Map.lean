@@ -357,7 +357,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
     | Key.char 'o' => pure $ (EditorState.insertLineBelow s).setMode Mode.insert
     | Key.char 'O' => pure $ (EditorState.insertLineAbove s).setMode Mode.insert
     | Key.char 'v' => pure $ EditorState.startVisualMode s
-    | Key.char 'V' => pure $ EditorState.startVisualMode s
+    | Key.char 'V' => pure $ EditorState.startVisualLineMode s
     | Key.ctrl 'v' => pure $ EditorState.startVisualBlockMode s
     | Key.char '0' =>
      if s.inputState.countBuffer.isEmpty then handleMotion s EditorState.moveToLineStart
@@ -633,6 +633,11 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
   visual := fun s k => match k with
     | Key.esc => pure $ EditorState.exitVisualMode s
     | Key.char 'v' => pure $ EditorState.exitVisualMode s
+    | Key.char 'V' =>
+        if s.mode == .visualLine then
+          pure $ EditorState.exitVisualMode s
+        else
+          pure $ EditorState.startVisualLineMode s
     | Key.char 'h' => pure $ clearInput (EditorState.moveCursorLeftN s s.getCount)
     | Key.char 'j' => pure $ clearInput (EditorState.moveCursorDownN s s.getCount)
     | Key.char 'k' => pure $ clearInput (EditorState.moveCursorUpN s s.getCount)

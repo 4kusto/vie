@@ -21,7 +21,7 @@ def customConfig : ViE.EditorConfig := {
   cursorSpaceStyle := (toBg Color.white) ++ (toFg Color.black)
 
   -- Explorer / preview
-  explorerPreviewSplitRatio := 0.5
+  explorerPreviewSplitRatio := 0.3
 
   -- Editing
   tabStop := 2

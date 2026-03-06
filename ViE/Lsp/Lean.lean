@@ -888,7 +888,7 @@ private def hoverDisplayColForMode (mode : Mode) (line : String) (tabStop cursor
   let base := min cursorCol lineW
   let shifted :=
     match mode with
-    | .normal | .visual | .visualBlock =>
+    | .normal | .visual | .visualLine | .visualBlock =>
         if base < lineW then
           ViE.Unicode.nextDisplayColWithTabStop line tabStop base
         else

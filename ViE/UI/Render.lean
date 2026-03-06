@@ -175,7 +175,7 @@ def render (state : EditorState) : IO EditorState := do
   if stateAfterLayout.mode == .searchForward || stateAfterLayout.mode == .searchBackward then
      buffer := buffer.push (Terminal.moveCursorStr (rows - 1) (1 + stateAfterLayout.inputState.commandBuffer.length))
 
-  if stateAfterLayout.mode == .visual || stateAfterLayout.mode == .visualBlock then
+  if stateAfterLayout.mode == .visual || stateAfterLayout.mode == .visualLine || stateAfterLayout.mode == .visualBlock then
     buffer := buffer.push Terminal.hideCursorStr
   else
     buffer := buffer.push Terminal.showCursorStr

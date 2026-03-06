@@ -118,7 +118,7 @@ def testEditing : IO Unit := do
   assertEqual "q does not enter command mode" Mode.normal s_q.mode
 
   let s_V ← runKeys s0 [Key.char 'V']
-  assertEqual "V enters visual mode" Mode.visual s_V.mode
+  assertEqual "V enters visual line mode" Mode.visualLine s_V.mode
 
   let s_ctrlV ← runKeys s0 [Key.ctrl 'v']
   assertEqual "Ctrl-v enters visual block mode" Mode.visualBlock s_ctrlV.mode
@@ -232,6 +232,19 @@ def testVisual : IO Unit := do
   let s_vy ← runKeys s1 [Key.char 'v', Key.char 'e', Key.char 'y']
   let s_vyp ← runKeys s_vy [Key.char '$', Key.char 'p']
   assertBuffer "visual y yanks selection" s_vyp "highlight mehighlight"
+
+  let s_linewise0 ← runKeys s0 ([Key.char 'i'] ++ keys "aa\nbb\ncc" ++ [Key.esc] ++ [Key.char 'g', Key.char 'g'])
+  let s_linewiseD ← runKeys s_linewise0 [Key.char 'V', Key.char 'j', Key.char 'd']
+  assertBuffer "visual line d deletes full lines" s_linewiseD "cc"
+  match s_linewiseD.clipboard with
+  | some reg =>
+      assertEqual "visual line d register kind" RegisterKind.linewise reg.kind
+      assertEqual "visual line d register text" "aa\nbb\n" reg.text
+  | none => assertEqual "visual line d register set" true false
+
+  let s_linewiseY ← runKeys s_linewise0 [Key.char 'V', Key.char 'j', Key.char 'y']
+  let s_linewiseP ← runKeys s_linewiseY [Key.char 'G', Key.char 'p']
+  assertBuffer "visual line y/p pastes linewise" s_linewiseP "aa\nbb\ncc\naa\nbb\n"
 
   let s_char0 ← runKeys s0 ([Key.char 'i'] ++ keys "abc" ++ [Key.esc] ++ [Key.char '0'])
   let s_charY ← runKeys s_char0 [Key.char 'l', Key.char 'v', Key.char 'y']

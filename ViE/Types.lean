@@ -11,6 +11,7 @@ inductive Mode where
   | searchForward
   | searchBackward
   | visual
+  | visualLine
   | visualBlock
   deriving Repr, BEq, Inhabited
 
@@ -22,6 +23,7 @@ instance : ToString Mode where
     | .searchForward => "SEARCH"
     | .searchBackward => "SEARCH"
     | .visual => "VISUAL"
+    | .visualLine => "VISUAL LINE"
     | .visualBlock => "VISUAL BLOCK"
 
 /-- Row index (0-based) with dimensional safety -/

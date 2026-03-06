@@ -59,6 +59,7 @@ def update (config : Config) (state : EditorState) (k : Key) : IO EditorState :=
   | .searchForward => ViE.Key.handleSearchInput state k
   | .searchBackward => ViE.Key.handleSearchInput state k
   | .visual => config.bindings.visual state k
+  | .visualLine => config.bindings.visual state k
   | .visualBlock => config.bindings.visualBlock state k
 
   let loadedState ← ViE.Buffer.ensureActiveBufferLoaded newState

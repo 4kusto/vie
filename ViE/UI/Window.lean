@@ -84,7 +84,7 @@ def renderWindow (state : EditorState) (windowId : Nat) (view : ViewState) (rect
       if state.config.showLineNumbers then
         winBuf := winBuf.push s!"{leftPad (toString (lineIdx.val + 1)) 3} "
 
-      let isVisual := state.mode == Mode.visual || state.mode == Mode.visualBlock
+      let isVisual := state.mode == Mode.visual || state.mode == Mode.visualLine || state.mode == Mode.visualBlock
       let selRange := if isVisual then state.selectionStart else none
       let (searchMatches, searchSt) := getLineSearchMatches currentSt buf.id lineIdx lineStr
       currentSt := searchSt
@@ -196,7 +196,7 @@ def renderFloatingWindow
   if borderFlags.top then
     out := out.push (Terminal.moveCursorStr top left)
     out := out.push border
-  let isVisual := st.mode == Mode.visual || st.mode == Mode.visualBlock
+  let isVisual := st.mode == Mode.visual || st.mode == Mode.visualLine || st.mode == Mode.visualBlock
   let hasSelection := isVisual && st.selectionStart.isSome
   for i in [0:innerH] do
     let lineIdx : Row := ⟨view.scrollRow.val + i⟩

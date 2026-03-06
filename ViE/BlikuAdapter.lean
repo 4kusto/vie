@@ -2,6 +2,7 @@ import Bliku.Tui
 import ViE.State
 import ViE.Buffer.Content
 import ViE.Color
+import ViE.Unicode
 
 namespace ViE.BlikuAdapter
 
@@ -176,10 +177,28 @@ private def toBlikuSelection (state : ViE.EditorState) : Option Bliku.Tui.Select
   match state.selectionStart with
   | none => none
   | some anchor =>
-      if state.mode == .visual || state.mode == .visualBlock then
+      if state.mode == .visual || state.mode == .visualLine || state.mode == .visualBlock then
+        let cursor :=
+          if state.mode == .visualLine then
+            let activeBuf := state.getActiveBuffer
+            let anchorRow := anchor.row.val
+            let cursorRow := state.getCursor.row.val
+            let endRow := max anchorRow cursorRow
+            let endLine := ViE.getLineFromBuffer activeBuf ⟨endRow⟩ |>.getD ""
+            let endCol := ViE.Unicode.stringWidthWithTabStop endLine state.config.tabStop
+            { row := endRow, col := endCol }
+          else
+            toBlikuCursor state.getCursor
+        let anchor' :=
+          if state.mode == .visualLine then
+            let anchorRow := anchor.row.val
+            let cursorRow := state.getCursor.row.val
+            { row := min anchorRow cursorRow, col := 0 }
+          else
+            toBlikuCursor anchor
         some {
-          anchor := toBlikuCursor anchor
-          cursor := toBlikuCursor state.getCursor
+          anchor := anchor'
+          cursor := cursor
           block := state.mode == .visualBlock
         }
       else
