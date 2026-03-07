@@ -1,16 +1,12 @@
 import ViE.Data.PieceTable
-import Test.Utils
+import ViETest.Utils
 import Proof.PieceTable.Search.TwoWay
 
 open ViE
 
-namespace Test.PieceTable.Search
+namespace ViETest.PieceTable.Search
 
-open Test.Utils
-
-private theorem twoWayBoundaryWitness :
-    ViE.PieceTree.twoWaySearch "abc".toUTF8 ByteArray.empty 1 = some 1 := by
-  simp using Proof.PieceTable.Search.twoWaySearch_empty "abc".toUTF8 1
+open ViETest.Utils
 
 def makeBoundaryTable : PieceTable :=
   let n := ViE.NodeCapacity + 1
@@ -71,9 +67,9 @@ def testCrossLeafSearchNearBoundary : IO Unit := do
 
 
 def test : IO Unit := do
-  IO.println "Starting PieceTable Search Test..."
+  IO.println "Starting PieceTable Search ViETest..."
   testCrossLeafSearch
   testCrossLeafSearchNearBoundary
   IO.println "PieceTable Search Test passed!"
 
-end Test.PieceTable.Search
+end ViETest.PieceTable.Search

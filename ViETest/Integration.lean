@@ -7,12 +7,12 @@ import ViE.State.Config
 import ViE.Config
 import ViE.Key.Map
 import ViE.Command.Impl
-import Test.Utils
+import ViETest.Utils
 
 open ViE
-open Test.Utils
+open ViETest.Utils
 
-namespace Test.Integration
+namespace ViETest.Integration
 
 -- Helper to construct a full Config
 def makeTestConfig : Config := {
@@ -34,7 +34,7 @@ def keys (s : String) : List Key :=
   s.toList.map Key.char
 
 def test : IO Unit := do
-  IO.println "Starting Integration Test..."
+  IO.println "Starting Integration ViETest..."
 
   -- Test 1: Typing "abc" -> Undo -> Insert "d"
   -- Expected: "abc" -> "" -> "d"
@@ -64,4 +64,4 @@ def test : IO Unit := do
 
   IO.println "IntegrationTest passed!"
 
-end Test.Integration
+end ViETest.Integration

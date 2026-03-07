@@ -2,7 +2,7 @@
 --
 -- SPDX-License-Identifier: BSD-3
 
-import Test.TreeStats
+import ViETest.TreeStats
 
 def main (args : List String) : IO Unit :=
-  Test.TreeStats.main args
+  ViETest.TreeStats.main args

@@ -3,10 +3,10 @@
 -- SPDX-License-Identifier: BSD-3
 
 import ViE
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.InfoView
-open Test.Utils
+namespace ViETest.InfoView
+open ViETest.Utils
 
 def makeTestConfig : ViE.Config := {
   settings := ViE.defaultConfig
@@ -15,7 +15,7 @@ def makeTestConfig : ViE.Config := {
 }
 
 def test : IO Unit := do
-  IO.println "Starting InfoView Test..."
+  IO.println "Starting InfoView ViETest..."
 
   let s0 : ViE.EditorState :=
     ({ ViE.initialState with message := "", floatingOverlay := none, mode := .normal, infoViewRequested := false }).updateActiveBuffer fun b =>
@@ -72,4 +72,4 @@ def test : IO Unit := do
 
   IO.println "InfoView Test passed!"
 
-end Test.InfoView
+end ViETest.InfoView

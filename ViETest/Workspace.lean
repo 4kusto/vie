@@ -9,13 +9,13 @@ import ViE.Command.Impl
 import ViE.App
 import ViE.Buffer.Content
 import ViE.Basic
-import Test.Utils
+import ViETest.Utils
 
 set_option maxRecDepth 2048
 
-namespace Test.Workspace
+namespace ViETest.Workspace
 
-open Test.Utils
+open ViETest.Utils
 open ViE
 
 def addWorkspace (state : EditorState) (ws : WorkspaceState) : EditorState :=
@@ -30,7 +30,7 @@ def switchWorkspace (state : EditorState) (idx : Nat) : EditorState :=
       wg
 
 def test : IO Unit := do
-  IO.println "Starting Workspace Test..."
+  IO.println "Starting Workspace ViETest..."
 
   let s0 := { ViE.initialState with windowHeight := 40, windowWidth := 120 }
   let wg0 := s0.getCurrentWorkgroup
@@ -54,7 +54,7 @@ def test : IO Unit := do
   let resolvedAbs := s2.getCurrentWorkspace.resolvePath "/abs/file.txt"
   assertEqual "ResolvePath keeps absolute path" "/abs/file.txt" resolvedAbs
 
-  IO.println "Starting Workspace Command Test..."
+  IO.println "Starting Workspace Command ViETest..."
   let s3 ← ViE.Command.cmdWs ["new", "Project B", "/tmp/project-b"] s2
   assertEqual "Workspace created and switched" "Project B" s3.getCurrentWorkspace.name
   assertEqual "Workspace rootPath set" (some "/tmp/project-b") s3.getCurrentWorkspace.rootPath
@@ -110,7 +110,7 @@ def test : IO Unit := do
   assertEqual "Workspace open --name suffix" "Project F" s11.getCurrentWorkspace.name
   assertEqual "Workspace open --name suffix rootPath" (some "/tmp/project-f") s11.getCurrentWorkspace.rootPath
 
-  IO.println "Starting Workspace Relative Path Resolution Test..."
+  IO.println "Starting Workspace Relative Path Resolution ViETest..."
   let stamp ← IO.monoMsNow
   let relBase := s!"/tmp/vie-ws-rel-{stamp}"
   IO.FS.createDirAll (System.FilePath.mk relBase)
@@ -130,7 +130,7 @@ def test : IO Unit := do
   let s12 ← ViE.Command.cmdWs ["close"] s11
   assertEqual "Workspace close switches to previous" "Project E" s12.getCurrentWorkspace.name
 
-  IO.println "Starting Workspace Explorer Preview Test..."
+  IO.println "Starting Workspace Explorer Preview ViETest..."
   let bufP1 : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 1 (some "/tmp/a.txt") #[stringToLine "A"]
   let bufP2 : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 2 (some "/tmp/b.txt") #[stringToLine "B"]
   let wsP : WorkspaceState := {
@@ -168,7 +168,7 @@ def test : IO Unit := do
     assertEqual "Workspace preview includes a.txt" true (previewText.contains "/tmp/a.txt")
     assertEqual "Workspace preview includes b.txt" true (previewText.contains "/tmp/b.txt")
 
-  IO.println "Starting Workspace Restore Test..."
+  IO.println "Starting Workspace Restore ViETest..."
   let bufA : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 0 none #[stringToLine "WS-A"]
   let bufB : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 10 none #[stringToLine "WS-B"]
   let wsA : WorkspaceState := {
@@ -197,7 +197,7 @@ def test : IO Unit := do
   assertEqual "Workspace selection switches current workspace" "WS-B" s12d.getCurrentWorkspace.name
   assertEqual "Workspace selection restores active buffer" "WS-B" s12d.getActiveBuffer.table.toString
 
-  IO.println "Starting Workspace Restore Layout Test..."
+  IO.println "Starting Workspace Restore Layout ViETest..."
   let bufC : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 20 none #[stringToLine "WS-C1"]
   let bufD : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 21 none #[stringToLine "WS-C2"]
   let layoutC : Layout :=
@@ -228,7 +228,7 @@ def test : IO Unit := do
   assertEqual "Workspace layout restore (cursor row)" 0 cursor.row.val
   assertEqual "Workspace layout restore (cursor col)" 2 cursor.col.val
 
-  IO.println "Starting Workspace Restore VSplit Test..."
+  IO.println "Starting Workspace Restore VSplit ViETest..."
   let bufE : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 30 none #[stringToLine "WS-D1"]
   let bufF : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 31 none #[stringToLine "WS-D2"]
   let layoutD : Layout :=
@@ -262,7 +262,7 @@ def test : IO Unit := do
   assertEqual "Workspace vsplit restore (scroll row)" 0 sRow.val
   assertEqual "Workspace vsplit restore (scroll col)" 1 sCol.val
 
-  IO.println "Starting Workspace Multi-View Restore Test..."
+  IO.println "Starting Workspace Multi-View Restore ViETest..."
   let bufG : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 40 none #[stringToLine "WS-E1"]
   let bufH : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 41 none #[stringToLine "WS-E2"]
   let bufI : FileBuffer := ViE.Buffer.fileBufferFromTextBuffer 42 none #[stringToLine "WS-E3"]
@@ -304,8 +304,8 @@ def test : IO Unit := do
     | _ => 0.0
   assertEqual "Multi-view restore (layout vsplit ratio)" 0.4 subRatio
 
-  IO.println "Starting Workspace Startup Target Test..."
-  let base := "Test/test_paths"
+  IO.println "Starting Workspace Startup Target ViETest..."
+  let base := "ViETest/test_paths"
   let absBase ← ViE.resolveAbsolutePath none base
 
   let dirOnly := s!"{base}/dir0"
@@ -338,8 +338,8 @@ def test : IO Unit := do
   assertEqual "Nonexistent file sets workspace to parent dir" (some newNestedParent) wsNewNested
   assertEqual "Nonexistent file keeps absolute filename" (some absNewNested) fileNewNested
 
-  IO.println "Starting Explorer Path Resolution Test..."
-  let absTest ← ViE.resolveAbsolutePath none "Test"
+  IO.println "Starting Explorer Path Resolution ViETest..."
+  let absTest ← ViE.resolveAbsolutePath none "ViETest"
   let s13 := s12.updateCurrentWorkspace fun ws =>
     { ws with rootPath := some absTest, name := "Test" }
   let s14 ← ViE.Feature.openExplorer s13 "."
@@ -349,4 +349,4 @@ def test : IO Unit := do
 
   IO.println "WorkspaceTest passed!"
 
-end Test.Workspace
+end ViETest.Workspace

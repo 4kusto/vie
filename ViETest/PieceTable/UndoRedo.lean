@@ -1,11 +1,11 @@
 import ViE.Data.PieceTable
-import Test.Utils
+import ViETest.Utils
 
 open ViE
 
-namespace Test.PieceTable.UndoRedo
+namespace ViETest.PieceTable.UndoRedo
 
-open Test.Utils
+open ViETest.Utils
 
 def testUndoRedo : IO Unit := do
   IO.println "testUndoRedo..."
@@ -61,9 +61,9 @@ def testComplexUndo : IO Unit := do
 
 
 def test : IO Unit := do
-  IO.println "Starting PieceTable Undo/Redo Test..."
+  IO.println "Starting PieceTable Undo/Redo ViETest..."
   testUndoRedo
   testComplexUndo
   IO.println "PieceTable Undo/Redo Test passed!"
 
-end Test.PieceTable.UndoRedo
+end ViETest.PieceTable.UndoRedo

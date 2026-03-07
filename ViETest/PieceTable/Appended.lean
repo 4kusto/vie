@@ -1,11 +1,11 @@
 import ViE.Data.PieceTable
-import Test.Utils
+import ViETest.Utils
 
 open ViE
 
-namespace Test.PieceTable.Appended
+namespace ViETest.PieceTable.Appended
 
-open Test.Utils
+open ViETest.Utils
 
 def testAppends : IO Unit := do
   IO.println "testAppends..."
@@ -20,8 +20,8 @@ def testAppends : IO Unit := do
   assertEqual "Append 2" "Line1\nLine2\nLine3" pt2.toString
 
 def test : IO Unit := do
-  IO.println "Starting PieceTable Appended Test..."
+  IO.println "Starting PieceTable Appended ViETest..."
   testAppends
   IO.println "PieceTable Appended Test passed!"
 
-end Test.PieceTable.Appended
+end ViETest.PieceTable.Appended

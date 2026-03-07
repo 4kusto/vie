@@ -9,12 +9,12 @@ import ViE.Types
 import ViE.Buffer.Content
 import ViE.Config
 import ViE.Command.Impl
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.Keybinds
+namespace ViETest.Keybinds
 
 open ViE
-open Test.Utils
+open ViETest.Utils
 
 def makeTestConfig : Config := {
   settings := ViE.defaultConfig
@@ -905,4 +905,4 @@ def test : IO Unit := do
   testLeanCompletionPopupBehavior
   IO.println "All Expanded Keybind Tests passed!"
 
-end Test.Keybinds
+end ViETest.Keybinds

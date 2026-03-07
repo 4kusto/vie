@@ -1,11 +1,11 @@
 import ViE.Data.PieceTable
-import Test.Utils
+import ViETest.Utils
 
 open ViE
 
-namespace Test.PieceTable.Basic
+namespace ViETest.PieceTable.Basic
 
-open Test.Utils
+open ViETest.Utils
 
 def testInsert : IO Unit := do
   IO.println "testInsert..."
@@ -39,9 +39,9 @@ def testDelete : IO Unit := do
   assertEqual "Delete end" "" pt3.toString
 
 def test : IO Unit := do
-  IO.println "Starting PieceTable Basic Test..."
+  IO.println "Starting PieceTable Basic ViETest..."
   testInsert
   testDelete
   IO.println "PieceTable Basic Test passed!"
 
-end Test.PieceTable.Basic
+end ViETest.PieceTable.Basic

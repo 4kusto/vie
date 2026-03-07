@@ -11,7 +11,7 @@ require mathlib from git "https://github.com/leanprover-community/mathlib4.git"
 
 lean_lib ViE
 
-lean_lib Test
+lean_lib ViETest
 
 lean_lib Proof
 
@@ -20,10 +20,10 @@ lean_exe vie where
   root := `Main
 
 lean_exe test where
-  root := `Test
+  root := `ViETest
 
 lean_exe bench where
-  root := `Test.Benchmark
+  root := `ViETest.Benchmark
 
 lean_exe proof where
   root := `Proof.Main

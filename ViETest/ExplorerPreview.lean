@@ -7,11 +7,11 @@ import ViE.Command.Explorer
 import ViE.Window.Analysis
 import ViE.Window.Actions
 import ViE.BlikuAdapter
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.ExplorerPreview
+namespace ViETest.ExplorerPreview
 
-open Test.Utils
+open ViETest.Utils
 open ViE
 
 def findEntryIndex (entries : List FileEntry) (name : String) : Option Nat :=
@@ -26,10 +26,10 @@ def findEntryIndex (entries : List FileEntry) (name : String) : Option Nat :=
   loop entries 0
 
 def test : IO Unit := do
-  IO.println "Starting Explorer Preview Test..."
+  IO.println "Starting Explorer Preview ViETest..."
 
   let s0 := { ViE.initialState with windowHeight := 40, windowWidth := 120 }
-  let path := "Test/test_paths/dir0/dir1"
+  let path := "ViETest/test_paths/dir0/dir1"
   let s1 ← ViE.Feature.openExplorer s0 path
   let buf := s1.getActiveBuffer
   let ws1 := s1.getCurrentWorkspace
@@ -166,4 +166,4 @@ def test : IO Unit := do
 
   IO.println "Explorer Preview Test passed!"
 
-end Test.ExplorerPreview
+end ViETest.ExplorerPreview

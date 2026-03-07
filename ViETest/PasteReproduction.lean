@@ -4,7 +4,7 @@
 
 import ViE.Data.PieceTable
 
-namespace Test.PasteReproduction
+namespace ViETest.PasteReproduction
 
 def test : IO Unit := do
   IO.println "--- Test 1: Paste below last line (no trailing newline) ---"

@@ -6,7 +6,7 @@ import ViE.Data.PieceTable
 
 open ViE
 
-namespace Test.Undo
+namespace ViETest.Undo
 
 def assert (msg : String) (cond : Bool) : IO Unit := do
   if cond then
@@ -16,7 +16,7 @@ def assert (msg : String) (cond : Bool) : IO Unit := do
     throw (IO.userError s!"Assertion failed: {msg}")
 
 def test : IO Unit := do
-  IO.println "Starting Undo/Redo Test..."
+  IO.println "Starting Undo/Redo ViETest..."
 
   -- 1. Create initial buffer
   let initialText := "Hello, World!"
@@ -126,4 +126,4 @@ def test : IO Unit := do
 
   IO.println "TestUndo passed!"
 
-end Test.Undo
+end ViETest.Undo

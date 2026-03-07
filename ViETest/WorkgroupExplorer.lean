@@ -7,11 +7,11 @@ import ViE.State.Layout
 import ViE.Command.Explorer
 import ViE.State.Config
 import ViE.Command.Impl
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.WorkgroupExplorer
+namespace ViETest.WorkgroupExplorer
 
-open Test.Utils
+open ViETest.Utils
 open ViE
 
 def addWorkspace (state : EditorState) (ws : WorkspaceState) : EditorState :=
@@ -28,7 +28,7 @@ def setCursorRow (state : EditorState) (row : Nat) : EditorState :=
   state.updateActiveView fun v => { v with cursor := { v.cursor with row := ⟨row⟩ } }
 
 def test : IO Unit := do
-  IO.println "Starting Workgroup Explorer Test..."
+  IO.println "Starting Workgroup Explorer ViETest..."
 
   let s0 := { ViE.initialState with windowHeight := 40, windowWidth := 120 }
   let ws1 := makeWorkspaceState "Project A" (some "/tmp/project-a") 10
@@ -95,4 +95,4 @@ def test : IO Unit := do
 
   IO.println "WorkgroupExplorerTest passed!"
 
-end Test.WorkgroupExplorer
+end ViETest.WorkgroupExplorer

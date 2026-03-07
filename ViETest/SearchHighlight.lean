@@ -4,16 +4,16 @@
 
 import ViE.UI
 import ViE.Config
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.SearchHighlight
+namespace ViETest.SearchHighlight
 
-open Test.Utils
+open ViETest.Utils
 open ViE
 
 
 def test : IO Unit := do
-  IO.println "Starting Search Highlight Test..."
+  IO.println "Starting Search Highlight ViETest..."
 
   let hitRanges : Array (Nat × Nat) := #[(0, 4), (10, 14), (20, 24)]
 
@@ -86,4 +86,4 @@ def test : IO Unit := do
   let (_, tabKeys) := ViE.parseKey ViE.initialState '\x09' (t0 + 30)
   assertEqual "Tab parses as char tab" [Key.char '\t'] tabKeys
 
-end Test.SearchHighlight
+end ViETest.SearchHighlight

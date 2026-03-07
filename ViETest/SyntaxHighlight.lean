@@ -3,12 +3,12 @@
 -- SPDX-License-Identifier: BSD-3
 
 import ViE.UI.Search
-import Test.Utils
+import ViETest.Utils
 import Bliku.Tui.Syntax
 
-open Test.Utils
+open ViETest.Utils
 
-namespace Test.SyntaxHighlight
+namespace ViETest.SyntaxHighlight
 
 private def firstRangeOf (line : String) (pat : String) : Option (Nat × Nat) :=
   (ViE.UI.findAllMatchesBytes line.toUTF8 pat.toUTF8)[0]?
@@ -37,9 +37,9 @@ def testMarkdown : IO Unit := do
     (Bliku.Tui.Syntax.faceForByteRange Bliku.Tui.Syntax.defaultPalette spans linkS linkE)
 
 def test : IO Unit := do
-  IO.println "Starting SyntaxHighlight Test..."
+  IO.println "Starting SyntaxHighlight ViETest..."
   testLean
   testMarkdown
   IO.println "SyntaxHighlight Test passed!"
 
-end Test.SyntaxHighlight
+end ViETest.SyntaxHighlight

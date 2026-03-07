@@ -6,7 +6,7 @@ import ViE.Types
 
 open ViE
 
-namespace Test.Layout
+namespace ViETest.Layout
 
 def assert (msg : String) (cond : Bool) : IO Unit := do
   if cond then
@@ -16,7 +16,7 @@ def assert (msg : String) (cond : Bool) : IO Unit := do
     throw (IO.userError s!"Assertion failed: {msg}")
 
 def test : IO Unit := do
-  IO.println "Starting Layout Test..."
+  IO.println "Starting Layout ViETest..."
 
   -- 1. Construct Layouts
   let view1 : ViewState := { bufferId := 1, cursor := {row:=0, col:=0}, scrollRow:=0, scrollCol:=0 }
@@ -46,4 +46,4 @@ def test : IO Unit := do
 
   IO.println "LayoutTest passed!"
 
-end Test.Layout
+end ViETest.Layout

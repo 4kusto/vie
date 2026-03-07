@@ -6,21 +6,21 @@ import ViE.App
 import ViE.Buffer.Manager
 import ViE.Checkpoint
 import ViE.State.Config
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.Checkpoint
+namespace ViETest.Checkpoint
 
-open Test.Utils
+open ViETest.Utils
 open ViE
 
 def testLoadSessionInvalid : IO Unit := do
-  IO.println "Starting Checkpoint Parse Invalid Test..."
+  IO.println "Starting Checkpoint Parse Invalid ViETest..."
   IO.FS.writeFile ViE.Checkpoint.sessionFile "--ACTIVE--\nnot-a-number\n"
   let loaded <- ViE.Checkpoint.loadSession
   assertEqual "Invalid checkpoint parses as none" none loaded
 
 def testLoadSessionValid : IO Unit := do
-  IO.println "Starting Checkpoint Parse Valid Test..."
+  IO.println "Starting Checkpoint Parse Valid ViETest..."
   let content :=
     "/tmp/file-a.txt\n" ++
     "0 0\n" ++
@@ -35,7 +35,7 @@ def testLoadSessionValid : IO Unit := do
   assertEqual "Valid checkpoint parsing" expected loaded
 
 def testBuildRestoredWorkspace : IO Unit := do
-  IO.println "Starting Restored Workspace Build Test..."
+  IO.println "Starting Restored Workspace Build ViETest..."
   let stamp <- IO.monoMsNow
   let root := s!"/tmp/vie-checkpoint-{stamp}"
   IO.FS.createDirAll root
@@ -72,7 +72,7 @@ def testBuildRestoredWorkspace : IO Unit := do
   assertEqual "Lazy loaded buffer keeps file path" (some f1) activeLoaded.filename
 
 def testBuildRestoredWorkspaceCustomTabStop : IO Unit := do
-  IO.println "Starting Restored Workspace Custom TabStop Test..."
+  IO.println "Starting Restored Workspace Custom TabStop ViETest..."
   let stamp <- IO.monoMsNow
   let root := s!"/tmp/vie-checkpoint-tab-{stamp}"
   IO.FS.createDirAll root
@@ -92,4 +92,4 @@ def test : IO Unit := do
   testBuildRestoredWorkspace
   testBuildRestoredWorkspaceCustomTabStop
 
-end Test.Checkpoint
+end ViETest.Checkpoint

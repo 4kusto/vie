@@ -5,13 +5,13 @@
 import ViE.State.Config
 import ViE.State.Layout
 import ViE.Data.PieceTable
-import Test.Utils
+import ViETest.Utils
 
 open ViE
 
-namespace Test.MissingEol
+namespace ViETest.MissingEol
 
-open Test.Utils
+open ViETest.Utils
 
 def testMissingEol : IO Unit := do
   IO.println "testMissingEol..."
@@ -41,8 +41,8 @@ def testMissingEol : IO Unit := do
 
 
 def test : IO Unit := do
-  IO.println "Starting MissingEol Test..."
+  IO.println "Starting MissingEol ViETest..."
   testMissingEol
   IO.println "MissingEol Test passed!"
 
-end Test.MissingEol
+end ViETest.MissingEol

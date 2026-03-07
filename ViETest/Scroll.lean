@@ -7,7 +7,7 @@ import ViE.State
 import ViE.Types
 import ViE.Config
 
-namespace Test.Scroll
+namespace ViETest.Scroll
 
 open ViE
 

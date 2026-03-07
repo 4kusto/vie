@@ -5,13 +5,13 @@
 import ViE.Buffer.LowIO
 import ViE.State.Config
 import ViE.State.Layout
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.PreviewData
+namespace ViETest.PreviewData
 
-open Test.Utils
+open ViETest.Utils
 
-def basePath : String := "Test/test_paths"
+def basePath : String := "ViETest/test_paths"
 
 def testFiles : List String := [
   s!"{basePath}/file0.txt",
@@ -28,7 +28,7 @@ def testFiles : List String := [
 ]
 
 def test : IO Unit := do
-  IO.println "Starting Preview Data Test..."
+  IO.println "Starting Preview Data ViETest..."
 
   for path in testFiles do
     let buf ← ViE.loadBufferByteArray path
@@ -43,4 +43,4 @@ def test : IO Unit := do
 
   IO.println "PreviewDataTest passed!"
 
-end Test.PreviewData
+end ViETest.PreviewData

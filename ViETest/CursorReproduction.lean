@@ -8,7 +8,7 @@ import ViE.Command.Impl
 import ViE.Key.Map
 import ViE.State.Edit
 
-namespace Test.CursorReproduction
+namespace ViETest.CursorReproduction
 
 open ViE
 
@@ -35,7 +35,7 @@ def runKeys (startState : EditorState) (keys : List Key) : IO EditorState := do
   return s
 
 def test : IO Unit := do
-  IO.println "Starting Cursor Reproduction Test..."
+  IO.println "Starting Cursor Reproduction ViETest..."
   let s := ViE.initialState
 
   -- Scenario: Insert, Undo, Insert
@@ -126,4 +126,4 @@ def test : IO Unit := do
 
   IO.println "Cursor Reproduction Test Finished"
 
-end Test.CursorReproduction
+end ViETest.CursorReproduction

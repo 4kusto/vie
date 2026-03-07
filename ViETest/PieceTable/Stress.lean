@@ -1,11 +1,11 @@
 import ViE.Data.PieceTable
-import Test.Utils
+import ViETest.Utils
 
 open ViE
 
-namespace Test.PieceTable.Stress
+namespace ViETest.PieceTable.Stress
 
-open Test.Utils
+open ViETest.Utils
 
 /-- Naive string manipulation for verification -/
 def naiveInsert (s : String) (idx : Nat) (content : String) : String :=
@@ -130,10 +130,10 @@ def testYankPasteClearing : IO Unit := do
   IO.println "[PASS] yank+paste 4000 iterations with getLineRange consistent"
 
 def test : IO Unit := do
-  IO.println "Starting PieceTable Stress Test..."
+  IO.println "Starting PieceTable Stress ViETest..."
   testConsistency
   testLengthAndLineCountConsistency
   testYankPasteClearing
   IO.println "PieceTable Stress Test passed!"
 
-end Test.PieceTable.Stress
+end ViETest.PieceTable.Stress

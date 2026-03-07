@@ -7,7 +7,7 @@ import ViE.Buffer.Content
 import ViE.State.Layout
 import ViE.State.Movement
 
-namespace Test.Utils
+namespace ViETest.Utils
 
 /-- Assert condition is true, throw error if false -/
 def assert (msg : String) (cond : Bool) : IO Unit := do
@@ -49,4 +49,4 @@ def assertCursor (msg : String) (est : ViE.EditorState) (r c : Nat) : IO Unit :=
     IO.println s!"  Actual:   ({cursor.row.val}, {cursor.col.val})"
     throw (IO.userError s!"Cursor assertion failed: {msg}")
 
-end Test.Utils
+end ViETest.Utils

@@ -9,7 +9,7 @@ import ViE.Data.PieceTable
 open ViE
 
 
-namespace Test.Buffer
+namespace ViETest.Buffer
 
 def assert (msg : String) (cond : Bool) : IO Unit := do
   if cond then
@@ -19,7 +19,7 @@ def assert (msg : String) (cond : Bool) : IO Unit := do
     throw (IO.userError s!"Assertion failed: {msg}")
 
 def test : IO Unit := do
-  IO.println "Starting Buffer Test..."
+  IO.println "Starting Buffer ViETest..."
 
   -- 1. Test fromString and getLine
   let text := "Hello\nWorld"
@@ -56,4 +56,4 @@ def test : IO Unit := do
 
   IO.println "BufferTest passed!"
 
-end Test.Buffer
+end ViETest.Buffer

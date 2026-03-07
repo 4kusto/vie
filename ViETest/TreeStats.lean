@@ -3,12 +3,12 @@
 -- SPDX-License-Identifier: BSD-3
 
 import ViE.Data.PieceTable
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.TreeStats
+namespace ViETest.TreeStats
 
 open ViE
-open Test.Utils
+open ViETest.Utils
 
 def buildWorkload (iterations : Nat) : PieceTable := Id.run do
   let mut pt := PieceTable.fromString "Initial content\n"
@@ -104,7 +104,7 @@ def report (pt : PieceTable) (iterations : Nat) : IO Unit := do
     IO.println s!"getLineRange(last)={stop - start}ms"
 
 def test : IO Unit := do
-  IO.println "Starting TreeStats Test..."
+  IO.println "Starting TreeStats ViETest..."
   let iterations := 3000
   let pt := buildWorkload iterations
   let t := pt.tree
@@ -128,4 +128,4 @@ def main (args : List String) : IO Unit := do
   let pt := buildWorkload iterations
   report pt iterations
 
-end Test.TreeStats
+end ViETest.TreeStats

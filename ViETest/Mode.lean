@@ -10,7 +10,7 @@ import ViE.State.Edit
 import ViE.State.Movement
 import Proof.Visual
 
-namespace Test.Mode
+namespace ViETest.Mode
 
 open ViE
 
@@ -41,7 +41,7 @@ def runKeys (startState : EditorState) (keys : List Key) : IO EditorState := do
   return s
 
 def test : IO Unit := do
-  IO.println "Starting Mode Test..."
+  IO.println "Starting Mode ViETest..."
   let s := ViE.initialState
 
   -- Scenario: Insert 'abc' then Esc.
@@ -83,4 +83,4 @@ def test : IO Unit := do
 
   IO.println "ModeTest passed!"
 
-end Test.Mode
+end ViETest.Mode

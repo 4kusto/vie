@@ -3,14 +3,14 @@
 -- SPDX-License-Identifier: BSD-3
 
 import ViE
-import Test.Utils
+import ViETest.Utils
 
-namespace Test.Lsp
+namespace ViETest.Lsp
 
-open Test.Utils
+open ViETest.Utils
 
 def test : IO Unit := do
-  IO.println "Starting LSP Test..."
+  IO.println "Starting LSP ViETest..."
 
   let leanBuf := { ViE.initialBuffer with filename := some "Main.lean" }
   let txtBuf := { ViE.initialBuffer with filename := some "notes.txt" }
@@ -45,4 +45,4 @@ def test : IO Unit := do
 
   IO.println "LSP Test passed!"
 
-end Test.Lsp
+end ViETest.Lsp
