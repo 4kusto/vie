@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 namespace ViE.Color
 
 /-- Represents terminal colors. -/
@@ -64,7 +68,7 @@ def reset : String := "\x1b[0m"
 /-- Helper to parse hex string like "#RRGGBB" or "RRGGBB". -/
 def fromHex (hex : String) : Option Color :=
   let s := if hex.startsWith "#" then hex.drop 1 else hex
-  if s.positions.count != 6 then none
+  if s.positions.length != 6 then none
   else
     let rStr := s.take 2
     let gStr := (s.drop 2).take 2

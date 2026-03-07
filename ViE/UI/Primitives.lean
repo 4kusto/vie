@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 import ViE.State
 import ViE.Unicode
 import Bliku.Tui.Primitives

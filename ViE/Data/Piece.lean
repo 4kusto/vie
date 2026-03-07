@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 namespace ViE
 
 /-- Source of a piece: either the original file (read-only) or the add buffer (append-only) -/

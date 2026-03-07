@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 import Test.Undo
 import Test.Buffer
 import Test.Layout

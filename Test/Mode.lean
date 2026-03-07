@@ -1,13 +1,22 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 import ViE.State.Config
 import ViE.Config
 import ViE.Command.Impl
 import ViE.Key.Map
 import ViE.State.Edit
 import ViE.State.Movement
+import Proof.Visual
 
 namespace Test.Mode
 
 open ViE
+
+private theorem visualLineProofWitness :
+    (ViE.initialState.startVisualLineMode).mode = .visualLine := by
+  simpa using Proof.startVisualLineMode_setsMode ViE.initialState
 
 def assert (msg : String) (cond : Bool) : IO Unit := do
   if cond then

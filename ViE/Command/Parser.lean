@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 namespace ViE.Command
 
 /-- Parse filename argument from command args.

@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 import ViE.State.Config
 import ViE.State.Layout
 import ViE.State.Movement

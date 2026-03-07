@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 import ViE.Data.PieceTable.Piece
 import ViE.Data.PieceTable.Tree
 import ViE.Unicode

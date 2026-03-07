@@ -2,5 +2,5 @@
 --
 -- SPDX-License-Identifier: BSD-3
 
-import ViE.Buffer.Manager
-import ViE.Buffer.Content
+import Proof.Visual
+import Proof.PieceTable.Search.TwoWay

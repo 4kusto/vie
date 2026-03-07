@@ -1,11 +1,16 @@
 import ViE.Data.PieceTable
 import Test.Utils
+import Proof.PieceTable.Search.TwoWay
 
 open ViE
 
 namespace Test.PieceTable.Search
 
 open Test.Utils
+
+private theorem twoWayBoundaryWitness :
+    ViE.PieceTree.twoWaySearch "abc".toUTF8 ByteArray.empty 1 = some 1 := by
+  simp using Proof.PieceTable.Search.twoWaySearch_empty "abc".toUTF8 1
 
 def makeBoundaryTable : PieceTable :=
   let n := ViE.NodeCapacity + 1

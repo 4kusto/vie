@@ -2,5 +2,7 @@
 --
 -- SPDX-License-Identifier: BSD-3
 
-import ViE.Buffer.Manager
-import ViE.Buffer.Content
+import Proof
+
+def main : IO Unit := do
+  pure ()

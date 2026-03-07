@@ -793,59 +793,69 @@ def getLineLength (t : ViE.PieceTree) (lineIdx : Nat) (pt : ViE.PieceTable) : Op
   | some (_, len) => some len
   | none => none
 
-def maximalSuffixLoop (x : ByteArray) (useLe : Bool) (m ms j k p : Int) : (Int × Int) :=
-  Id.run do
-    let mut ms := ms
-    let mut j := j
-    let mut k := k
-    let mut p := p
-    -- Keep an execution cap for robustness against malformed index states.
-    let mNat := Int.toNat m
-    let mut steps := (mNat + 1) * (mNat + 1) + 1
-    while steps > 0 && j + k < m do
-      let a := x[Int.toNat (j + k)]!
-      let b := x[Int.toNat (ms + k)]!
-      if useLe then
-        if a < b then
-          let jk := j + k
-          j := jk
-          k := 1
-          p := jk - ms
-        else if a == b then
-          if k != p then
-            k := k + 1
-          else
-            j := j + p
-            k := 1
-        else
-          ms := j
-          j := j + 1
-          k := 1
-          p := 1
-      else if a > b then
+/-- Proof-friendly recursive core for maximal suffix computation. -/
+inductive MaximalSuffixStep where
+  | stop
+  | next (ms j k p : Int)
+
+/-- Single-step transition for maximal suffix computation. -/
+def maximalSuffixStep
+    (x : ByteArray) (useLe : Bool) (m : Int) (steps : Nat)
+    (ms j k p : Int) : MaximalSuffixStep :=
+  if steps = 0 || ¬ (j + k < m) then
+    .stop
+  else
+    let a := x[Int.toNat (j + k)]!
+    let b := x[Int.toNat (ms + k)]!
+    if useLe then
+      if a < b then
         let jk := j + k
-        j := jk
-        k := 1
-        p := jk - ms
+        .next ms jk 1 (jk - ms)
       else if a == b then
         if k != p then
-          k := k + 1
+          .next ms j (k + 1) p
         else
-          j := j + p
-          k := 1
+          .next ms (j + p) 1 p
       else
-        ms := j
-        j := j + 1
-        k := 1
-        p := 1
-      steps := steps - 1
-    return (ms, p)
+        .next j (j + 1) 1 1
+    else if a > b then
+      let jk := j + k
+      .next ms jk 1 (jk - ms)
+    else if a == b then
+      if k != p then
+        .next ms j (k + 1) p
+      else
+        .next ms (j + p) 1 p
+    else
+      .next j (j + 1) 1 1
+
+/-- Proof-friendly recursive core for maximal suffix computation. -/
+def maximalSuffixLoopCore
+    (x : ByteArray) (useLe : Bool) (m : Int) (steps : Nat)
+    (ms j k p : Int) : (Int × Int) :=
+  if steps = 0 then
+    (ms, p)
+  else
+    match maximalSuffixStep x useLe m steps ms j k p with
+    | .stop => (ms, p)
+    | .next ms' j' k' p' =>
+        maximalSuffixLoopCore x useLe m (steps - 1) ms' j' k' p'
+  termination_by steps
+  decreasing_by
+    simp_wf
+    omega
+
+def maximalSuffixLoop (x : ByteArray) (useLe : Bool) (m ms j k p : Int) : (Int × Int) :=
+  let mNat := Int.toNat m
+  let steps := (mNat + 1) * (mNat + 1) + 1
+  maximalSuffixLoopCore x useLe m steps ms j k p
 
 def maximalSuffix (x : ByteArray) (useLe : Bool) : (Int × Int) :=
   let m : Int := x.size
   maximalSuffixLoop x useLe m (-1) 0 1 1
 
-private def twoWayForward1Core (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Nat) : Nat :=
+/-- Core forward scan used by the two-way matcher. Exposed for proof modules. -/
+def twoWayForward1Core (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Nat) : Nat :=
   if j >= n then
     j
   else if haystack[i + j]! == needle[j]! then
@@ -860,7 +870,8 @@ private def twoWayForward1Core (haystack needle : ByteArray) (i : Nat) (n : Nat)
 def twoWayForward1 (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) : Int :=
   Int.ofNat (twoWayForward1Core haystack needle i n (Int.toNat j))
 
-private def twoWayBackward1Core (haystack needle : ByteArray) (i : Nat) (mem : Int) (steps : Nat) : Int :=
+/-- Core backward scan with memory used by the short-period two-way matcher. Exposed for proof modules. -/
+def twoWayBackward1Core (haystack needle : ByteArray) (i : Nat) (mem : Int) (steps : Nat) : Int :=
   if hSteps : steps = 0 then
     mem
   else
@@ -881,7 +892,8 @@ def twoWayBackward1 (haystack needle : ByteArray) (i : Nat) (mem : Int) (j : Int
     let steps := Int.toNat (j - mem)
     twoWayBackward1Core haystack needle i mem steps
 
-private def twoWayForward2Core (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Nat) : Nat :=
+/-- Core forward scan used by the long-period two-way matcher. Exposed for proof modules. -/
+def twoWayForward2Core (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Nat) : Nat :=
   if j >= n then
     j
   else if haystack[i + j]! == needle[j]! then
@@ -896,7 +908,8 @@ private def twoWayForward2Core (haystack needle : ByteArray) (i : Nat) (n : Nat)
 def twoWayForward2 (haystack needle : ByteArray) (i : Nat) (n : Nat) (j : Int) : Int :=
   Int.ofNat (twoWayForward2Core haystack needle i n (Int.toNat j))
 
-private def twoWayBackward2Core (haystack needle : ByteArray) (i : Nat) (steps : Nat) : Int :=
+/-- Core backward scan used by the long-period two-way matcher. Exposed for proof modules. -/
+def twoWayBackward2Core (haystack needle : ByteArray) (i : Nat) (steps : Nat) : Int :=
   if hSteps : steps = 0 then
     -1
   else
@@ -916,7 +929,8 @@ def twoWayBackward2 (haystack needle : ByteArray) (i : Nat) (j : Int) : Int :=
   else
     twoWayBackward2Core haystack needle i (Int.toNat (j + 1))
 
-private def twoWayShortLoopCore (haystack needle : ByteArray) (_start maxStart msNat pNat n : Nat) (i : Nat) (mem : Int) : Option Nat :=
+/-- Core short-period loop for the two-way matcher. Exposed for proof modules. -/
+def twoWayShortLoopCore (haystack needle : ByteArray) (_start maxStart msNat pNat n : Nat) (i : Nat) (mem : Int) : Option Nat :=
   if i > maxStart then
     none
   else
@@ -955,7 +969,8 @@ private def twoWayShortLoopCore (haystack needle : ByteArray) (_start maxStart m
 def twoWayShortLoop (haystack needle : ByteArray) (start maxStart msNat pNat n : Nat) (i : Nat) (mem : Int) : Option Nat :=
   twoWayShortLoopCore haystack needle start maxStart msNat pNat n i mem
 
-private def twoWayLongLoopCore (haystack needle : ByteArray) (_start maxStart msNat pNat n : Nat) (i : Nat) : Option Nat :=
+/-- Core long-period loop for the two-way matcher. Exposed for proof modules. -/
+def twoWayLongLoopCore (haystack needle : ByteArray) (_start maxStart msNat pNat n : Nat) (i : Nat) : Option Nat :=
   if i > maxStart then
     none
   else

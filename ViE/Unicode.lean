@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 namespace ViE.Unicode
 
 /-- Ranges of characters that have a visual width of 2 (Fullwidth/Wide).

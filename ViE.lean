@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 Yuki Otsuka
+--
+-- SPDX-License-Identifier: BSD-3
+
 -- This module serves as the root of the `Editor` library.
 -- Import modules here that should be built as part of the library.
 import ViE.Basic
