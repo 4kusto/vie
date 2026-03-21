@@ -9,7 +9,7 @@ import ViE.Key.Map
 import ViE.State.Edit
 import ViE.State.Search
 import ViE.Data.PieceTable.Tree
-import ViE.UI
+import ViE.BlikuAdapter
 
 namespace ViE.Benchmark
 
@@ -174,7 +174,7 @@ def benchRender (iterations : Nat) : IO Unit := do
   let mut s := ViE.initialState
   for _ in [0:iterations/20] do
     s := s.insertChar 'a'
-  let _ ← ViE.UI.render s
+  let _ ← ViE.BlikuAdapter.render s
 
 /-- Generate large text content of specified size (in bytes). -/
 def buildLargeText (sizeBytes : Nat) : String :=

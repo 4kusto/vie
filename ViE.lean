@@ -12,9 +12,9 @@ import ViE.Command
 import ViE.Key
 import ViE.State
 import ViE.Terminal
-import ViE.UI
 import ViE.IO
 import ViE.Config
 import ViE.App
 import ViE.Loader
 import ViE.Workspace
+import ViE.BlikuAdapter

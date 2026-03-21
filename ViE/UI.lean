@@ -4,6 +4,5 @@
 
 import ViE.UI.Primitives
 import ViE.UI.Search
-import ViE.UI.Overlay
-import ViE.UI.Window
-import ViE.UI.Render
+-- Legacy renderer modules remain available for benchmarks and reference,
+-- but the main app renders through `ViE.BlikuAdapter`.
