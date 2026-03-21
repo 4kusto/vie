@@ -1,5 +1,6 @@
 import ViE.State
 import ViE.Lsp.Lean
+import ViE.Buffer.EditQueue
 
 namespace ViE.Language.Lean.Key
 
@@ -21,9 +22,11 @@ def handleInsertKey? (state : EditorState) (k : Key) : IO (Option EditorState) :
       | Key.enter =>
           return some <| ViE.Lsp.Lean.clearCompletionPopup state.insertNewline
       | Key.esc =>
-          return some <| ViE.Lsp.Lean.clearCompletionPopup ((state.commitEdit.moveCursorLeft).setMode Mode.normal)
+          let s' ← ViE.Buffer.EditQueue.awaitActiveInsertOps state
+          return some <| ViE.Lsp.Lean.clearCompletionPopup ((s'.commitEdit.moveCursorLeft).setMode Mode.normal)
       | Key.backspace =>
-          let s' := state.deleteBeforeCursor
+          let s1 ← ViE.Buffer.EditQueue.awaitActiveInsertOps state
+          let s' := s1.deleteBeforeCursor
           return some (← ViE.Lsp.Lean.requestCompletionForActiveIfRunning s')
       | Key.char c =>
           let s' := state.insertChar c
@@ -40,7 +43,8 @@ def handleInsertKey? (state : EditorState) (k : Key) : IO (Option EditorState) :
           let s' := state.insertChar c
           return some (← ViE.Lsp.Lean.requestCompletionForActiveIfRunning s')
       | Key.backspace =>
-          let s' := state.deleteBeforeCursor
+          let s1 ← ViE.Buffer.EditQueue.awaitActiveInsertOps state
+          let s' := s1.deleteBeforeCursor
           return some (← ViE.Lsp.Lean.requestCompletionForActiveIfRunning s')
       | _ =>
           return none

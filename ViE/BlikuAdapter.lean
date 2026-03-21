@@ -119,11 +119,16 @@ private def toBlikuCompletion (cp : ViE.CompletionPopup) : Bliku.Tui.CompletionV
     anchorCol := cp.anchorCol
   }
 
-private def bufferLines (buf : ViE.FileBuffer) : Array String := Id.run do
-  let mut lines : Array String := #[]
-  for i in [0:buf.lineCount] do
-    lines := lines.push ((ViE.getLineFromBuffer buf ⟨i⟩).getD "")
-  return lines
+private def bufferLines (buf : ViE.FileBuffer) : Array String :=
+  -- Building all lines via repeated getLineRange is costly (O(lines * tree walk)).
+  -- Convert once and split to avoid hammering findNthNewlineLeafCore.
+  let lines := (buf.table.toString.splitOn "\n").toArray
+  if lines.size == buf.lineCount then
+    lines
+  else if lines.size < buf.lineCount then
+    lines ++ Array.replicate (buf.lineCount - lines.size) ""
+  else
+    lines.extract 0 buf.lineCount
 
 private def toBlikuBuffer (buf : ViE.FileBuffer) : Bliku.Tui.BufferState :=
   {

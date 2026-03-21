@@ -5,7 +5,6 @@ This directory contains perf profiling helpers for the `bench` executable.
 ## Quick Summary
 
 - `perf_bench_bin.sh`: perf record for the bench binary directly (no lake overhead).
-- `perf_bench_lake.sh`: perf record via `lake exe bench` (includes lake overhead).
 - `perf_profile.sh`: heavier profiling (perf and optional c2c) with reports and flamegraph.
 
 ## Common Output
@@ -32,19 +31,6 @@ Key options:
 - `--iterations N`
 - `--case NAME` or `--cases NAME,NAME`
 - `--no-render` is passed to the bench by default (override with `PERF_BENCH_ARGS`).
-
-## perf_bench_lake.sh
-
-Purpose: perf capture through `lake exe bench` (measures lake overhead too).
-
-Usage examples:
-
-```bash
-./scripts/perf_bench_lake.sh --iterations 10000 --case linear
-./scripts/perf_bench_lake.sh --cases linear,bloom --iterations 20000
-```
-
-Key options match `perf_bench_bin.sh`.
 
 ## perf_profile.sh
 

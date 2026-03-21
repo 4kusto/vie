@@ -29,7 +29,6 @@
           default = pkgs.mkShell {
             packages =
               [
-                pkgs.lean4
                 pkgs.elan
                 pkgs.git
                 pkgs.pijul

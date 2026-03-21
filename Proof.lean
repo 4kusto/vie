@@ -3,4 +3,5 @@
 -- SPDX-License-Identifier: BSD-3
 
 import Proof.Visual
+import Proof.PieceTable.Invariant
 import Proof.PieceTable.Search.TwoWay

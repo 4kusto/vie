@@ -349,6 +349,7 @@ structure WorkgroupState where
 
 structure EditorState where
   mode : Mode
+  editSessionId : Nat := 0
   -- Workgroup management
   workgroups : Array WorkgroupState
   currentGroup : Nat

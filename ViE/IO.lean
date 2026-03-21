@@ -36,6 +36,9 @@ def saveBuffer (state : EditorState) (filename : String) : IO EditorState := do
     -- Rename temp file to target file (atomic on POSIX)
     IO.FS.rename tempFilename filename
 
+    -- File contents changed on disk; drop read cache for this path.
+    ViE.invalidateBufferLoadCache filename
+
     -- After save, reload as clean mmap
     let newBuffer ← loadBufferByteArrayWithConfig filename state.config
     let newBuffer := { newBuffer with id := buffer.id, dirty := false }

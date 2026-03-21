@@ -41,9 +41,9 @@ structure DiagnosticInfo where
 structure UiState where
   pendingHover : Lean.RBMap Nat (String × Nat × Nat) compare
   pendingCompletion : Lean.RBMap Nat (String × Nat × Nat × String) compare
+  latestCompletionReqId : Option Nat := none
   hover : Option HoverInfo
   completion : Option (String × CompletionPopup)
-  diagnostics : Lean.RBMap String (Array DiagnosticInfo) compare
   deriving Inhabited
 
 structure Session where
@@ -58,12 +58,44 @@ initialize uiStateRef : IO.Ref UiState ← do
   IO.mkRef {
     pendingHover := Lean.RBMap.empty
     pendingCompletion := Lean.RBMap.empty
+    latestCompletionReqId := none
     hover := none
     completion := none
-    diagnostics := Lean.RBMap.empty
   }
 initialize initializeAckRef : IO.Ref (Option Nat) ← IO.mkRef none
 initialize readerFailureRef : IO.Ref (Option (UInt32 × String)) ← IO.mkRef none
+
+private def diagnosticsShardCount : Nat := 16
+private abbrev DiagnosticsMap := Lean.RBMap String (Array DiagnosticInfo) compare
+
+initialize diagnosticsShards : Array (IO.Ref DiagnosticsMap) ← do
+  let mut shards : Array (IO.Ref DiagnosticsMap) := #[]
+  for _ in [0:diagnosticsShardCount] do
+    let r ← IO.mkRef (Lean.RBMap.empty : DiagnosticsMap)
+    shards := shards.push r
+  pure shards
+
+private def diagnosticsShardIdx (uri : String) : Nat :=
+  (hash uri).toNat % diagnosticsShardCount
+
+private def diagnosticsGet (uri : String) : IO (Array DiagnosticInfo) := do
+  let idx := diagnosticsShardIdx uri
+  match diagnosticsShards[idx]? with
+  | none => pure #[]
+  | some shard =>
+      let m ← shard.get
+      pure ((m.find? uri).getD #[])
+
+private def diagnosticsInsert (uri : String) (items : Array DiagnosticInfo) : IO Unit := do
+  let idx := diagnosticsShardIdx uri
+  match diagnosticsShards[idx]? with
+  | none => pure ()
+  | some shard =>
+      shard.modify fun m => m.insert uri items
+
+private def diagnosticsClearAll : IO Unit := do
+  for shard in diagnosticsShards do
+    shard.set (Lean.RBMap.empty : DiagnosticsMap)
 
 private def isLeanPath (path : String) : Bool :=
   path.endsWith ".lean"
@@ -213,10 +245,10 @@ private def resetUiState : IO Unit :=
   uiStateRef.set {
     pendingHover := Lean.RBMap.empty
     pendingCompletion := Lean.RBMap.empty
+    latestCompletionReqId := none
     hover := none
     completion := none
-    diagnostics := Lean.RBMap.empty
-  }
+  } *> diagnosticsClearAll
 
 private def getObjStr? (j : Lean.Json) (k : String) : Option String :=
   (j.getObjValAs? String k).toOption
@@ -467,44 +499,52 @@ private def handleDiagnosticsNotification (params : Lean.Json) : IO Unit := do
       | some item => acc.push item
       | none => acc
     ) #[]
-    let st ← uiStateRef.get
-    uiStateRef.set { st with diagnostics := st.diagnostics.insert uri parsed }
+    diagnosticsInsert uri parsed
 
 private def handleHoverResponse (reqId : Nat) (result : Lean.Json) : IO Unit := do
-  let st ← uiStateRef.get
-  let pending := st.pendingHover
-  let hoverMap := pending.erase reqId
-  match pending.find? reqId with
-  | none =>
-      uiStateRef.set { st with pendingHover := hoverMap }
-  | some (uri, line, col) =>
-      let hover :=
-        match parseHoverText result with
-        | some txt =>
-            let range? := parseHoverRange result
-            some { uri := uri, line := line, col := col, range? := range?, text := txt }
-        | none =>
-            match st.hover with
-            | some h =>
-                if h.uri == uri && h.line == line && h.col == col then some h else none
-            | none => none
-      uiStateRef.set { st with pendingHover := hoverMap, hover := hover }
+  uiStateRef.modify fun st =>
+    let pending := st.pendingHover
+    let hoverMap := pending.erase reqId
+    match pending.find? reqId with
+    | none =>
+        { st with pendingHover := hoverMap }
+    | some (uri, line, col) =>
+        let hover :=
+          match parseHoverText result with
+          | some txt =>
+              let range? := parseHoverRange result
+              some { uri := uri, line := line, col := col, range? := range?, text := txt }
+          | none =>
+              match st.hover with
+              | some h =>
+                  if h.uri == uri && h.line == line && h.col == col then some h else none
+              | none => none
+        { st with pendingHover := hoverMap, hover := hover }
 
 private def handleCompletionResponse (reqId : Nat) (result : Lean.Json) : IO Unit := do
-  let st ← uiStateRef.get
-  let pending := st.pendingCompletion
-  let pending' := pending.erase reqId
-  match pending.find? reqId with
-  | none =>
-      uiStateRef.set { st with pendingCompletion := pending' }
-  | some (uri, row, col, query) =>
-      let items := rankAndSelectCompletions query (parseCompletionItems result) 40
-      let completion :=
-        if items.isEmpty then
-          none
+  uiStateRef.modify fun st =>
+    let pending := st.pendingCompletion
+    let pending' := pending.erase reqId
+    let isLatest := st.latestCompletionReqId == some reqId
+    match pending.find? reqId with
+    | none =>
+        { st with pendingCompletion := pending' }
+    | some (uri, row, col, query) =>
+        if !isLatest then
+          { st with pendingCompletion := pending' }
         else
-          some (uri, { items := items, selected := 0, anchorRow := row, anchorCol := col })
-      uiStateRef.set { st with pendingCompletion := pending', completion := completion }
+          let items := rankAndSelectCompletions query (parseCompletionItems result) 40
+          let completion :=
+            if items.isEmpty then
+              none
+            else
+              some (uri, { items := items, selected := 0, anchorRow := row, anchorCol := col })
+          {
+            st with
+              pendingCompletion := pending'
+              latestCompletionReqId := none
+              completion := completion
+          }
 
 private def handleIncomingJson (j : Lean.Json) : IO Unit := do
   let method? := getObjStr? j "method"
@@ -529,12 +569,15 @@ private def handleIncomingJson (j : Lean.Json) : IO Unit := do
           if (j.getObjVal? "error").toOption.isSome then
             let some reqId := jsonNat? idJson | return ()
             initializeAckRef.set (some reqId)
-            let st ← uiStateRef.get
-            uiStateRef.set {
-              st with
-                pendingHover := st.pendingHover.erase reqId
-                pendingCompletion := st.pendingCompletion.erase reqId
-            }
+            uiStateRef.modify fun st =>
+              let clearCompletion := st.latestCompletionReqId == some reqId
+              {
+                st with
+                  pendingHover := st.pendingHover.erase reqId
+                  pendingCompletion := st.pendingCompletion.erase reqId
+                  latestCompletionReqId := if clearCompletion then none else st.latestCompletionReqId
+                  completion := if clearCompletion then none else st.completion
+              }
           else
             pure ()
       | _, _ => pure ()
@@ -575,9 +618,10 @@ private def waitForInitializeAck (child : LspChild) (reqId : Nat) (timeoutMs : N
         match (← child.tryWait) with
         | some _ => pure false
         | none =>
-            match (← initializeAckRef.get) with
+            let got? ← initializeAckRef.modifyGet fun got =>
+              (got, none)
+            match got? with
             | some got =>
-                initializeAckRef.set none
                 if got == reqId then
                   pure true
                 else
@@ -632,7 +676,7 @@ private def syncBuffer (session : Session) (buf : FileBuffer) : IO Session := do
         let uri ← fileUriWithWorkspace session.rootPath path
         let version := (session.versions.find? uri).getD 0
         let nextVersion := version + 1
-        let text := buf.table.toString
+        let text ← ViE.PieceTree.getSubstringParallelIO buf.table.tree 0 buf.table.tree.length buf.table
         if version == 0 then
           let didOpenParams := Lean.Json.mkObj [
             ("textDocument", Lean.Json.mkObj [
@@ -666,8 +710,8 @@ private def requestHover (session : Session) (uri : String) (line lspCol cursorC
     ])
   ]
   send session.child.stdin (mkRequest reqId "textDocument/hover" params)
-  let st ← uiStateRef.get
-  uiStateRef.set { st with pendingHover := st.pendingHover.insert reqId (uri, line, cursorCol) }
+  uiStateRef.modify fun st =>
+    { st with pendingHover := st.pendingHover.insert reqId (uri, line, cursorCol) }
   pure { session with nextId := reqId + 1 }
 
 private def requestCompletion (session : Session) (uri : String) (line lspCol row col : Nat) (query : String) : IO Session := do
@@ -681,8 +725,12 @@ private def requestCompletion (session : Session) (uri : String) (line lspCol ro
     ("context", Lean.Json.mkObj [("triggerKind", (1 : Lean.Json))])
   ]
   send session.child.stdin (mkRequest reqId "textDocument/completion" params)
-  let st ← uiStateRef.get
-  uiStateRef.set { st with pendingCompletion := st.pendingCompletion.insert reqId (uri, row, col, query) }
+  uiStateRef.modify fun st =>
+    {
+      st with
+        pendingCompletion := st.pendingCompletion.insert reqId (uri, row, col, query)
+        latestCompletionReqId := some reqId
+    }
   pure { session with nextId := reqId + 1 }
 
 private def startForState (state : EditorState) : IO EditorState := do
@@ -977,8 +1025,13 @@ def clearCompletionPopup (state : EditorState) : EditorState :=
   { state with completionPopup := none }
 
 private def clearUiCompletion : IO Unit := do
-  let st ← uiStateRef.get
-  uiStateRef.set { st with pendingCompletion := Lean.RBMap.empty }
+  uiStateRef.modify fun st =>
+    {
+      st with
+      pendingCompletion := Lean.RBMap.empty
+      latestCompletionReqId := none
+      completion := none
+    }
 
 def selectNextCompletion (state : EditorState) : EditorState :=
   match state.completionPopup with
@@ -1049,7 +1102,7 @@ def requestCompletionForActiveIfRunning (state : EditorState) : IO EditorState :
                 let query := String.ofList (chars.drop startIdx |>.take (endIdx - startIdx))
                 let uri ← fileUriWithWorkspace s.rootPath path
                 let line := cursor.row.val
-                let lspCol := cursor.col.val
+                let lspCol := utf16ColFromDisplayCol lineStr state.config.tabStop cursor.col.val
                 let s' ← requestCompletion s uri line lspCol cursor.row.val cursor.col.val query
                 sessionRef.set (some s')
                 pure state
@@ -1109,7 +1162,7 @@ private def formatInfoViewContent (workspaceRoot : Option String) (tabStop : Nat
           "No type information at cursor."
     | none => "No type information at cursor."
 
-  let problems := st.diagnostics.find? uri |>.getD #[]
+  let problems ← diagnosticsGet uri
   let problemLines :=
     if problems.isEmpty then
       #["No problems."]
@@ -1171,7 +1224,7 @@ def syncEditorUpdate (prevState nextState : EditorState) : IO EditorState := do
   let prevBuf := prevState.getActiveBuffer
   let nextBuf := nextState.getActiveBuffer
   let sameActiveBuffer := prevBuf.id == nextBuf.id
-  let textChanged := sameActiveBuffer && prevBuf.table.toString != nextBuf.table.toString
+  let textChanged := sameActiveBuffer && prevBuf.table.contentVersion != nextBuf.table.contentVersion
   let oldBuf? :=
     if prevState.infoViewRequested then
       some prevState.getActiveBuffer
@@ -1188,7 +1241,7 @@ def syncEditorUpdate (prevState nextState : EditorState) : IO EditorState := do
     | some oldBuf =>
         let newBuf := nextState.getActiveBuffer
         oldBuf.id == newBuf.id &&
-        oldBuf.table.toString != newBuf.table.toString
+        oldBuf.table.contentVersion != newBuf.table.contentVersion
   let shouldRefreshHoverNow :=
     match oldCursor? with
     | none => false
@@ -1203,6 +1256,8 @@ def syncEditorUpdate (prevState nextState : EditorState) : IO EditorState := do
     syncActiveBufferIfRunning nextState
   if shouldSyncLspNow || shouldRefreshHoverNow then
     syncHoverForActiveIfRunning nextState
+  if nextState.mode != .insert then
+    clearUiCompletion
   let noCompletion :=
     if nextState.mode != .insert then
       clearCompletionPopup nextState

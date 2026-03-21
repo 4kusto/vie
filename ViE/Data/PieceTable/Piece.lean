@@ -105,6 +105,7 @@ structure PieceTable where
   original : ByteArray
   addBuffers : Array ByteArray
   tree : PieceTree
+  contentVersion : Nat := 0
   lineIndexCache : Option (Array Nat) := none
   bloomBuildLeafBits : Bool := true
   bloomBuildOnEdit : Bool := false

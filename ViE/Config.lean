@@ -6,6 +6,7 @@ import ViE.State
 import ViE.Key.Handler
 import ViE.Key.Input
 import ViE.Buffer.Manager
+import ViE.Buffer.EditQueue
 import ViE.Lsp.Lean
 
 namespace ViE
@@ -56,6 +57,7 @@ def enforceScroll (state : EditorState) : EditorState :=
   state
 
 def update (config : Config) (state : EditorState) (k : Key) : IO EditorState := do
+  let state ← ViE.Buffer.EditQueue.ensureSessionId state
   let newState ← match state.mode with
   | .normal => config.bindings.normal state k
   | .insert => config.bindings.insert state k

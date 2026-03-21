@@ -148,6 +148,25 @@ def findChildForOffset (imeta : ViE.InternalMeta) (offset : UInt64) : Nat :=
 
     return left
 
+/-- Binary search to find child index containing the given line-break index. -/
+def findChildForLine (imeta : ViE.InternalMeta) (lineIdx : UInt64) : Nat :=
+  Id.run do
+    let arr := imeta.cumulativeLines
+    if arr.isEmpty then return 0
+    if arr.size == 1 then return 0
+
+    let mut left := 0
+    let mut right := arr.size - 2
+
+    while left < right do
+      let mid := (left + right + 1) / 2
+      if arr[mid]! <= lineIdx then
+        left := mid
+      else
+        right := mid - 1
+
+    return left
+
 def bloomOr (a b : ByteArray) : ByteArray := Id.run do
   let mut out := a
   let size := min a.size b.size
@@ -706,9 +725,52 @@ private def getBytesCore (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : Vi
 def getBytes (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : ByteArray :=
   getBytesCore t offset len pt
 
+/-- Parallel byte extraction for large ranges. Falls back to `getBytes` for small reads. -/
+def getBytesParallelIO (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable)
+  (chunkSize : Nat := 128 * 1024) (parallelChunks : Nat := 4) : IO ByteArray := do
+  if len == 0 || parallelChunks <= 1 || len <= chunkSize then
+    pure (getBytes t offset len pt)
+  else
+    let chunks : Array (Nat × Nat) := Id.run do
+      let mut out : Array (Nat × Nat) := #[]
+      let mut off := offset
+      let endOff := offset + len
+      while off < endOff do
+        let readLen := min chunkSize (endOff - off)
+        out := out.push (off, readLen)
+        off := off + readLen
+      return out
+    if chunks.size <= 1 then
+      pure (getBytes t offset len pt)
+    else
+      let mut out : ByteArray := ByteArray.mk (Array.mkEmpty len)
+      let mut i := 0
+      while i < chunks.size do
+        let mut batch : Array (Task (Except IO.Error ByteArray)) := #[]
+        let mut j := 0
+        while j < parallelChunks && i + j < chunks.size do
+          let (off, l) := chunks[i + j]!
+          let task ← IO.asTask (pure (getBytes t off l pt))
+          batch := batch.push task
+          j := j + 1
+        for task in batch do
+          match task.get with
+          | .ok part =>
+              for b in part.data do
+                out := out.push b
+          | .error e => throw e
+        i := i + batch.size
+      pure out
+
 /-- Get substring from tree -/
 def getSubstring (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable) : String :=
   String.fromUTF8! (getBytes t offset len pt)
+
+/-- Parallel substring extraction for large ranges. -/
+def getSubstringParallelIO (t : ViE.PieceTree) (offset : Nat) (len : Nat) (pt : ViE.PieceTable)
+  (chunkSize : Nat := 128 * 1024) (parallelChunks : Nat := 4) : IO String := do
+  let bytes ← getBytesParallelIO t offset len pt chunkSize parallelChunks
+  pure (String.fromUTF8! bytes)
 
 /-- Find the leaf and relative offset containing the Nth newline -/
 private def findNthNewlineLeafCore (t : ViE.PieceTree) (n : Nat) (pt : ViE.PieceTable) (accOffset : Nat)
@@ -745,21 +807,14 @@ private def findNthNewlineLeafCore (t : ViE.PieceTree) (n : Nat) (pt : ViE.Piece
             currOff := currOff + p.length.toNat
             i := i + 1
           return none
-      | ViE.PieceTree.internal children _ _ _ =>
-          let mut i := 0
-          let mut found := false
-          while i < children.size && !found do
-            let child := children[i]!
-            let childLines := lineBreaks child
-            if currN < childLines then
-              node := child
-              found := true
-            else
-              currN := currN - childLines
-              currOff := currOff + length child
-              i := i + 1
-          if !found then
+      | ViE.PieceTree.internal children _ _ imeta =>
+          if children.isEmpty then
             return none
+          let childIdx := findChildForLine imeta currN.toUInt64
+          let child := children[childIdx]!
+          currN := currN - imeta.cumulativeLines[childIdx]!.toNat
+          currOff := currOff + imeta.cumulativeBytes[childIdx]!.toNat
+          node := child
     return none
 
 def findNthNewlineLeaf (t : ViE.PieceTree) (n : Nat) (pt : ViE.PieceTable) : Option (ViE.Piece × Nat × Nat) :=
@@ -792,6 +847,42 @@ def getLineLength (t : ViE.PieceTree) (lineIdx : Nat) (pt : ViE.PieceTable) : Op
   match getLineRange t lineIdx pt with
   | some (_, len) => some len
   | none => none
+
+/-- Get line index (0-based) containing the byte offset.
+    Newline byte itself belongs to the previous line (same as getLineRange semantics). -/
+def getLineIndexAtOffset (t : ViE.PieceTree) (offset : Nat) (pt : ViE.PieceTable) : Nat := Id.run do
+  let target := min offset (length t)
+  let mut node := t
+  let mut currLines := 0
+  let mut rem := target
+  while true do
+    match node with
+    | ViE.PieceTree.empty =>
+        return currLines
+    | ViE.PieceTree.leaf pieces _ _ =>
+        let mut i := 0
+        while i < pieces.size && rem > 0 do
+          let p := pieces[i]!
+          let pLen := p.length.toNat
+          if rem >= pLen then
+            currLines := currLines + p.lineBreaks.toNat
+            rem := rem - pLen
+          else
+            let buf := PieceTableHelper.getBuffer pt p.source
+            let (lines, _) := ViE.Unicode.countNewlinesAndChars buf p.start.toNat rem
+            currLines := currLines + lines
+            rem := 0
+          i := i + 1
+        return currLines
+    | ViE.PieceTree.internal children _ _ imeta =>
+        if children.isEmpty then
+          return currLines
+        let childIdx := findChildForOffset imeta rem.toUInt64
+        currLines := currLines + imeta.cumulativeLines[childIdx]!.toNat
+        let childStart := imeta.cumulativeBytes[childIdx]!.toNat
+        rem := rem - childStart
+        node := children[childIdx]!
+  return currLines
 
 /-- Proof-friendly recursive core for maximal suffix computation. -/
 inductive MaximalSuffixStep where

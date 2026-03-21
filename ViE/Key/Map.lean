@@ -9,6 +9,7 @@ import ViE.Window.Actions
 import ViE.Command.Explorer
 import ViE.Command.Dispatch
 import ViE.Basic
+import ViE.Buffer.EditQueue
 import ViE.Language.Key
 
 namespace ViE.Key
@@ -168,7 +169,8 @@ def shouldRenderMessageAsFloat (msg : String) : Bool :=
 
 /-- Default key bindings. -/
 def makeKeyMap (commands : CommandMap) : KeyMap := {
-  normal := fun s k =>
+  normal := fun s k => do
+  let s ← ViE.Buffer.EditQueue.awaitActiveInsertOps s
   let rawCount (state : EditorState) : Nat :=
       match state.inputState.countBuffer.toNat? with
       | some n => n
@@ -498,7 +500,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
             -- gg implementation
             let n := s.getCount
             let line := if n > 0 then n else 1
-            pure $ clearInput (EditorState.jumpToLine s line)
+            pure $ clearInput ((EditorState.jumpToLine s line).moveToLineStart)
          | _ => pure s'
       else
          match c with
@@ -508,7 +510,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
             let line := match s.inputState.countBuffer.toNat? with
               | some n => n
               | none => s.getActiveBuffer.lineCount
-            pure $ clearInput (EditorState.jumpToLine s line)
+            pure $ clearInput ((EditorState.jumpToLine s line).moveToLineStart)
          | _ =>
             if c.isDigit then
                pure { s with inputState := { s.inputState with countBuffer := s.inputState.countBuffer.push c } }
@@ -626,10 +628,17 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
         | some s' => pure s'
         | none =>
             match k with
-            | Key.esc => pure $ (s.commitEdit.moveCursorLeft).setMode Mode.normal
-            | Key.backspace => pure $ s.deleteBeforeCursor
-            | Key.char c => pure $ s.insertChar c
-            | Key.enter => pure { s.insertNewline with completionPopup := none }
+            | Key.esc => do
+                let s' ← ViE.Buffer.EditQueue.awaitActiveInsertOps s
+                pure $ (s'.commitEdit.moveCursorLeft).setMode Mode.normal
+            | Key.backspace => do
+                let s' ← ViE.Buffer.EditQueue.enqueueBackspace s
+                ViE.Buffer.EditQueue.awaitActiveInsertOps s'
+            | Key.char c => ViE.Buffer.EditQueue.enqueueInsertChar s c
+            | Key.enter => do
+                let s' ← ViE.Buffer.EditQueue.enqueueInsertNewline s
+                let s'' ← ViE.Buffer.EditQueue.awaitActiveInsertOps s'
+                pure { s'' with completionPopup := none }
             | _ => pure s,
 
   command := handleCommandInput commands,
@@ -655,7 +664,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
         let line := match s.inputState.countBuffer.toNat? with
           | some n => n
           | none => s.getActiveBuffer.lineCount
-        pure $ clearInput (EditorState.jumpToLine s line)
+        pure $ clearInput ((EditorState.jumpToLine s line).moveToLineStart)
     | Key.char 'd' => pure $ EditorState.deleteSelection s
     | Key.char 'x' => pure $ EditorState.deleteSelection s
     | Key.char 'y' => pure $ EditorState.yankSelection s
@@ -666,7 +675,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
             | some 'g' =>
                let n := s.getCount
                let line := if n > 0 then n else 1
-               pure $ clearInput (EditorState.jumpToLine s line)
+               pure $ clearInput ((EditorState.jumpToLine s line).moveToLineStart)
             | _ => pure { s with inputState := { s.inputState with previousKey := some 'g' } }
          | _ =>
             if c.isDigit then
@@ -689,7 +698,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
         let line := match s.inputState.countBuffer.toNat? with
           | some n => n
           | none => s.getActiveBuffer.lineCount
-        pure $ clearInput (EditorState.jumpToLine s line)
+        pure $ clearInput ((EditorState.jumpToLine s line).moveToLineStart)
     | Key.char 'd' => pure $ EditorState.deleteSelection s
     | Key.char 'x' => pure $ EditorState.deleteSelection s
     | Key.char 'y' => pure $ EditorState.yankSelection s
@@ -700,7 +709,7 @@ def makeKeyMap (commands : CommandMap) : KeyMap := {
             | some 'g' =>
                let n := s.getCount
                let line := if n > 0 then n else 1
-               pure $ clearInput (EditorState.jumpToLine s line)
+               pure $ clearInput ((EditorState.jumpToLine s line).moveToLineStart)
             | _ => pure { s with inputState := { s.inputState with previousKey := some 'g' } }
          | _ =>
             if c.isDigit then

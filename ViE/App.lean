@@ -65,11 +65,29 @@ def buildRestoredWorkspace (settings : EditorConfig) (workspacePath : Option Str
   }
   let filesArr := files.toArray
   let safeActiveIdx := if activeIdx < filesArr.size then activeIdx else 0
+  let mut loadTasks : Array (Task (Except IO.Error FileBuffer)) := #[]
+  for i in [0:filesArr.size] do
+    let fname := filesArr[i]!
+    if i == safeActiveIdx then
+      let t ← IO.asTask (loadBufferByteArrayWithConfig fname settings)
+      loadTasks := loadTasks.push t
+    else
+      -- Keep lazy placeholders semantically, but warm file cache in parallel.
+      prefetchBufferByteArrayWithConfig fname settings
+      let t ← IO.asTask (pure (emptyBuffer (some fname) buildLeafBits settings.searchBloomBuildOnEdit))
+      loadTasks := loadTasks.push t
   let mut loaded : Array FileBuffer := #[]
   for i in [0:filesArr.size] do
     let fname := filesArr[i]!
     if i == safeActiveIdx then
-      let buf ← loadBufferByteArrayWithConfig fname settings
+      let bufResult :=
+        match loadTasks[i]? with
+        | some t => t.get
+        | none => Except.ok (emptyBuffer (some fname) buildLeafBits settings.searchBloomBuildOnEdit)
+      let buf :=
+        match bufResult with
+        | Except.ok b => b
+        | Except.error _ => emptyBuffer (some fname) buildLeafBits settings.searchBloomBuildOnEdit
       loaded := loaded.push {
         buf with
           id := i
@@ -120,6 +138,15 @@ def loop (config : Config) (state0 : EditorState) : IO Unit := do
   let mut state := state0
   let mut quit := false
   while !quit do
+    let prevState := state
+    let (drainedState, drained) ← ViE.Buffer.EditQueue.drainCompletedInsertOps state
+    state ←
+      if drained then
+        let synced ← ViE.Lsp.Lean.syncEditorUpdate prevState drainedState
+        pure (ViE.enforceScroll synced)
+      else
+        pure drainedState
+
     -- Only render if state is dirty
     state ← if state.dirty then
       ViE.BlikuAdapter.render state

@@ -7,7 +7,6 @@
 # Roles:
 #   - perf_profile.sh: full perf/c2c profiling for the bench binary.
 #   - perf_bench_bin.sh: perf profiling of bench binary (no lake exec overhead).
-#   - perf_bench_lake.sh: perf profiling via lake exe (includes lake overhead).
 
 set -euo pipefail
 
