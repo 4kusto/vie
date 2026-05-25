@@ -106,28 +106,12 @@ def searchMetaOf (t : ViE.PieceTree) : ViE.SearchBloom :=
 
 /-- Compute cumulative offsets from children stats for O(log n) lookup -/
 def computeCumulativeOffsets (children : Array ViE.PieceTree) : ViE.InternalMeta :=
-  Id.run do
-    let mut cumBytes : Array UInt64 := #[0]
-    let mut cumLines : Array UInt64 := #[0]
-    let mut cumChars : Array UInt64 := #[0]
-
-    for i in [0:children.size] do
-      let child := children[i]!
+  let (cumBytes, cumLines, cumChars) := children.foldl
+    (fun (cb, cl, cc) child =>
       let s := stats child
-
-      let prevBytes := cumBytes.back!
-      let prevLines := cumLines.back!
-      let prevChars := cumChars.back!
-
-      cumBytes := cumBytes.push (prevBytes + s.bytes)
-      cumLines := cumLines.push (prevLines + s.lines)
-      cumChars := cumChars.push (prevChars + s.chars)
-
-    return {
-      cumulativeBytes := cumBytes,
-      cumulativeLines := cumLines,
-      cumulativeChars := cumChars
-    }
+      (cb.push (cb.back! + s.bytes), cl.push (cl.back! + s.lines), cc.push (cc.back! + s.chars)))
+    (#[0], #[0], #[0])
+  { cumulativeBytes := cumBytes, cumulativeLines := cumLines, cumulativeChars := cumChars }
 
 /-- Binary search to find child index containing the given byte offset -/
 def findChildForOffset (imeta : ViE.InternalMeta) (offset : UInt64) : Nat :=
@@ -358,26 +342,20 @@ def combineBloom (left right : ViE.SearchBloom) : ViE.SearchBloom :=
     let bits := addBoundaryTrigrams bits left.suffixBytes right.prefixBytes
     { bits := bits, prefixBytes := pref, suffixBytes := suf, hasBits := true }
 
-def buildBloomForChildren (children : Array ViE.PieceTree) : ViE.SearchBloom := Id.run do
-  if children.isEmpty then
-    return ViE.SearchBloom.empty
-  let mut acc := searchMetaOf children[0]!
-  for i in [1:children.size] do
-    acc := combineBloom acc (searchMetaOf children[i]!)
-  return acc
+def buildBloomForChildren (children : Array ViE.PieceTree) : ViE.SearchBloom :=
+  match children[0]? with
+  | none => ViE.SearchBloom.empty
+  | some first =>
+      (children.extract 1 children.size).foldl
+        (fun acc child => combineBloom acc (searchMetaOf child))
+        (searchMetaOf first)
 
-def patternTrigramHashes (pattern : ByteArray) : Array (Nat × Nat) := Id.run do
-  if pattern.size < 3 then
-    return #[]
-  let arr := pattern.data
-  let limit := pattern.size - 2
-  let mut hashes : Array (Nat × Nat) := #[]
-  for i in [0:limit] do
-    let b0 := arr[i]!
-    let b1 := arr[i + 1]!
-    let b2 := arr[i + 2]!
-    hashes := hashes.push (hash1 b0 b1 b2, hash2 b0 b1 b2)
-  return hashes
+def patternTrigramHashes (pattern : ByteArray) : Array (Nat × Nat) :=
+  if pattern.size < 3 then #[]
+  else
+    let arr := pattern.data
+    (Array.range (pattern.size - 2)).map fun i =>
+      (hash1 arr[i]! arr[i + 1]! arr[i + 2]!, hash2 arr[i]! arr[i + 1]! arr[i + 2]!)
 
 def bloomMayContain (searchMeta : ViE.SearchBloom) (hashes : Array (Nat × Nat)) : Bool :=
   if hashes.isEmpty then
@@ -1330,6 +1308,18 @@ def searchPrev (t : ViE.PieceTree) (pt : ViE.PieceTable) (pattern : ByteArray) (
   (useBloom : Bool) (cache : Lean.RBMap Nat ByteArray compare) (order : Array Nat) (cacheMax : Nat)
   : (Option Nat × Lean.RBMap Nat ByteArray compare × Array Nat) :=
   searchPrevCore t pt pattern startExclusive chunkSize useBloom cache order cacheMax
+
+/-- Traverse the tree and rebuild bloom bits for every leaf node.
+    Used by :bloom on-demand build for files that exceeded the load-time threshold. -/
+partial def rebuildBloomsForTree (t : ViE.PieceTree) (pt : ViE.PieceTable) : ViE.PieceTree :=
+  let buildPt := { pt with bloomBuildLeafBits := true, bloomBuildOnEdit := true }
+  match t with
+  | ViE.PieceTree.empty => ViE.PieceTree.empty
+  | ViE.PieceTree.leaf pieces s _ =>
+      ViE.PieceTree.leaf pieces s (buildBloomForPieces pieces buildPt)
+  | ViE.PieceTree.internal children s _ im =>
+      let newChildren := children.map (rebuildBloomsForTree · pt)
+      ViE.PieceTree.internal newChildren s (buildBloomForChildren newChildren) im
 
 end PieceTree
 

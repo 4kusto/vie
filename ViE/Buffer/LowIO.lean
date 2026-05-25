@@ -62,9 +62,9 @@ def emptyBuffer (filename : Option String) (buildLeafBits : Bool) (buildOnEdit :
   cache := { lineMap := Lean.RBMap.empty, rawLineMap := Lean.RBMap.empty, lineIndexMap := Lean.RBMap.empty }
 }
 
-def bufferFromData (filename : String) (data : ByteArray) (buildLeafBits buildOnEdit : Bool) : FileBuffer :=
+def bufferFromData (filename : String) (data : ByteArray) (buildLeafBits buildOnEdit : Bool) (threshold : Nat := 524288) : FileBuffer :=
   let missingEol := data.size > 0 && data[data.size - 1]! != 10
-  let table := PieceTable.fromByteArray data buildLeafBits buildOnEdit
+  let table := PieceTable.fromByteArray data buildLeafBits buildOnEdit threshold
   {
     id := 0
     filename := some filename
@@ -96,6 +96,7 @@ def loadBufferByteArray (filename : String) : IO FileBuffer := do
 def loadBufferByteArrayWithConfig (filename : String) (config : EditorConfig) : IO FileBuffer := do
   let buildLeafBits := config.searchBloomBuildLeafBits
   let buildOnEdit := config.searchBloomBuildOnEdit
+  let threshold := config.searchBloomBuildSizeThreshold
   let key := loadCacheKey filename buildLeafBits buildOnEdit
   try
     let path := System.FilePath.mk filename
@@ -107,7 +108,7 @@ def loadBufferByteArrayWithConfig (filename : String) (config : EditorConfig) : 
         | some cached => return cached
         | none =>
             let data ← IO.FS.readBinFile filename
-            let buf := bufferFromData filename data buildLeafBits buildOnEdit
+            let buf := bufferFromData filename data buildLeafBits buildOnEdit threshold
             loadCacheInsert key buf
             return buf
     else

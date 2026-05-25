@@ -12,7 +12,11 @@ def sessionFile : String := "/tmp/editor_session.tmp"
 /-- Save current session state to a temporary file. -/
 def saveSession (state : EditorState) : IO Unit := do
   let ws := state.getCurrentWorkspace
-  let buffers := ws.buffers.filter (fun b => b.filename.isSome)
+  -- Exclude virtual buffers (explorer/preview) so they are not treated as real files on restore.
+  let buffers := ws.buffers.filter (fun b =>
+    match b.filename with
+    | some fname => !fname.startsWith "explorer://" && !fname.startsWith "preview://"
+    | none => false)
 
   let activeBuffer := state.getActiveBuffer
   let activeIdx := buffers.findIdx? (fun b => b.id == activeBuffer.id) |>.getD 0
@@ -26,12 +30,13 @@ def saveSession (state : EditorState) : IO Unit := do
 
   let mut content := ""
   for b in buffers do
-    content := content ++ b.filename.get! ++ "\n"
-    if b.id == activeBuffer.id then
-       let cursor := state.getCursor
-       content := content ++ s!"{cursor.row} {cursor.col}\n"
-    else
-       content := content ++ "0 0\n"
+    if let some fname := b.filename then
+      content := content ++ fname ++ "\n"
+      if b.id == activeBuffer.id then
+         let cursor := state.getCursor
+         content := content ++ s!"{cursor.row} {cursor.col}\n"
+      else
+         content := content ++ "0 0\n"
 
   content := content ++ "--ACTIVE--\n"
   content := content ++ s!"{activeIdx}\n"

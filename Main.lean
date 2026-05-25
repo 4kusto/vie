@@ -9,8 +9,7 @@ open ViE.Color
 
 def customConfig : ViE.EditorConfig := {
   ViE.defaultConfig with
-  -- View
-  showLineNumbers := true
+  showLineNumbers := false
   emptyLineMarker := "・"
 
   -- Splits
@@ -32,8 +31,7 @@ def customConfig : ViE.EditorConfig := {
 
   -- Status line / terminal reset
   statusBarStyle := (toBg Color.brightBlack) ++ (toFg Color.white)
-  resetStyle := ViE.Color.reset
-
+  
   -- Explorer icons
   fileIcon := "📄 "
   dirIcon := "📁 "
@@ -42,7 +40,8 @@ def customConfig : ViE.EditorConfig := {
   searchBloomCacheMax := 1024
   searchBloomBuildLeafBits := true
   searchBloomBuildOnEdit := false
-
+  searchBloomBuildSizeThreshold := 524288
+  
   -- History
   historyLimit := 200
 

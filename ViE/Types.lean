@@ -137,6 +137,7 @@ structure EditorConfig where
   searchBloomCacheMax : Nat
   searchBloomBuildLeafBits : Bool
   searchBloomBuildOnEdit : Bool := false
+  searchBloomBuildSizeThreshold : Nat := 524288
   historyLimit : Nat := 100
   deriving Inhabited
 

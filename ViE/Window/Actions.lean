@@ -34,10 +34,10 @@ def switchWindow (state : EditorState) (dir : Direction) : EditorState :=
       | none => some p
       | some (_, br, bc, _, _) =>
          match dir with
-         | .left => if c' > bc then some p else some acc.get!
-         | .right => if c' < bc then some p else some acc.get!
-         | .up => if r' > br then some p else some acc.get!
-         | .down => if r' < br then some p else some acc.get!
+         | .left => if c' > bc then some p else acc
+         | .right => if c' < bc then some p else acc
+         | .up => if r' > br then some p else acc
+         | .down => if r' < br then some p else acc
     ) none
 
     match best with

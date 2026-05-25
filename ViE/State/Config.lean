@@ -36,6 +36,7 @@ def defaultConfig : EditorConfig := {
   searchBloomCacheMax := 1024
   searchBloomBuildLeafBits := true
   searchBloomBuildOnEdit := false
+  searchBloomBuildSizeThreshold := 524288
 }
 
 def initialInputState : InputState := {

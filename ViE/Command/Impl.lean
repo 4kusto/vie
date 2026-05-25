@@ -96,7 +96,14 @@ def cmdBloom (args : List String) (state : EditorState) : IO EditorState := do
   if pattern.isEmpty then
     return { state with message := "Empty search pattern" }
   else
-    let s' := ViE.startOrUpdateSearch state pattern direction true
+    let state' :=
+      if state.config.searchBloomBuildLeafBits then
+        let activeBuf := state.getActiveBuffer
+        if !(ViE.PieceTree.searchMetaOf activeBuf.table.tree).hasBits then
+          state.updateActiveBuffer fun buf => { buf with table := buf.table.rebuildBlooms }
+        else state
+      else state
+    let s' := ViE.startOrUpdateSearch state' pattern direction true
     let s'' := ViE.findNextMatch s' (some direction)
     return s''
 

@@ -9,14 +9,8 @@ import ViE.Unicode
 
 namespace ViE
 
-private def updateLineIndexOnInsert (_pt : PieceTable) (_offset : Nat) (_text : String) : Option (Array Nat) :=
-  none
-
-private def updateLineIndexOnDelete (_pt : PieceTable) (_offset : Nat) (_length : Nat) : Option (Array Nat) :=
-  none
-
 /-- Construct from bytes. `buildOnEdit` controls bloom rebuilding during subsequent edits. -/
-def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) (buildOnEdit : Bool := false) : PieceTable :=
+def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) (buildOnEdit : Bool := false) (threshold : Nat := 524288) : PieceTable :=
   if bytes.size == 0 then
     {
       original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits,
@@ -61,7 +55,7 @@ def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) 
     let pieces := splitChunks 0 #[]
     let tmpPt : PieceTable := {
       -- Build bloom bits during initial load if enabled, regardless of edit policy.
-      original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits, bloomBuildOnEdit := true,
+      original := bytes, addBuffers := #[], tree := PieceTree.empty, bloomBuildLeafBits := buildLeafBits, bloomBuildOnEdit := buildLeafBits && bytes.size < threshold,
       undoStack := [], redoStack := [], undoStackCount := 0, redoStackCount := 0, undoLimit := 100, lastInsert := none
     }
     let tree := PieceTree.fromPieces pieces tmpPt
@@ -71,8 +65,11 @@ def PieceTable.fromByteArray (bytes : ByteArray) (buildLeafBits : Bool := true) 
     }
 
 /-- Construct from initial string. -/
-def PieceTable.fromString (s : String) (buildLeafBits : Bool := true) (buildOnEdit : Bool := false) : PieceTable :=
-  PieceTable.fromByteArray s.toUTF8 buildLeafBits buildOnEdit
+def PieceTable.fromString (s : String) (buildLeafBits : Bool := true) (buildOnEdit : Bool := false) (threshold : Nat := 524288) : PieceTable :=
+  PieceTable.fromByteArray s.toUTF8 buildLeafBits buildOnEdit threshold
+
+def PieceTable.rebuildBlooms (pt : PieceTable) : PieceTable :=
+  { pt with tree := PieceTree.rebuildBloomsForTree pt.tree pt }
 
 /-- Convert tree to string -/
 def PieceTable.toString (pt : PieceTable) : String :=
@@ -117,7 +114,7 @@ def PieceTable.insert (pt : PieceTable) (offset : Nat) (text : String) (cursorOf
     { pt' with
       tree := newTree
       contentVersion := pt.contentVersion + 1
-      lineIndexCache := updateLineIndexOnInsert pt offset text
+      lineIndexCache := none
       undoStack := finalUndoStack
       undoStackCount := newUndoCount
       redoStack := []
@@ -137,7 +134,7 @@ def PieceTable.delete (pt : PieceTable) (offset : Nat) (length : Nat) (cursorOff
     { pt with
       tree := newTree
       contentVersion := pt.contentVersion + 1
-      lineIndexCache := updateLineIndexOnDelete pt offset length
+      lineIndexCache := none
       undoStack := finalStack
       undoStackCount := finalCount
       redoStack := []
@@ -156,7 +153,7 @@ def PieceTable.insertRaw (pt : PieceTable) (offset : Nat) (text : String) : Piec
     { pt' with
       tree := newTree
       contentVersion := pt.contentVersion + 1
-      lineIndexCache := updateLineIndexOnInsert pt offset text
+      lineIndexCache := none
       lastInsert := none
     }
 
@@ -168,7 +165,7 @@ def PieceTable.deleteRaw (pt : PieceTable) (offset : Nat) (length : Nat) : Piece
     { pt with
       tree := newTree
       contentVersion := pt.contentVersion + 1
-      lineIndexCache := updateLineIndexOnDelete pt offset length
+      lineIndexCache := none
       lastInsert := none
     }
 
